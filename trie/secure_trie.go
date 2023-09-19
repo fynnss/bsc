@@ -192,7 +192,7 @@ func (t *StateTrie) MustDelete(key []byte) {
 // DeleteStorage removes any existing storage slot from the trie.
 // If the specified trie node is not in the trie, nothing will be changed.
 // If a node is not found in the database, a MissingNodeError is returned.
-func (t *StateTrie) DeleteStorage(addr common.Address, key []byte) error {
+func (t *StateTrie) DeleteStorage(_ common.Address, key []byte) error {
 	hk := t.hashKey(key)
 	delete(t.getSecKeyCache(), string(hk))
 	return t.trie.Delete(hk)
@@ -284,12 +284,13 @@ func (t *StateTrie) MustNodeIterator(start []byte) NodeIterator {
 //
 // no use hashKeyBuf for thread safe.
 func (t *StateTrie) hashKey(key []byte) []byte {
+	hash := make([]byte, common.HashLength)
 	h := newHasher(false)
 	h.sha.Reset()
 	h.sha.Write(key)
-	h.sha.Read(t.hashKeyBuf[:])
+	h.sha.Read(hash)
 	returnHasherToPool(h)
-	return t.hashKeyBuf[:]
+	return hash
 }
 
 // getSecKeyCache returns the current secure key cache, creating a new one if

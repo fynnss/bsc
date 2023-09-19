@@ -58,9 +58,9 @@ func (s Storage) Copy() Storage {
 // stateObject represents an Ethereum account which is being modified.
 //
 // The usage pattern is as follows:
-// First you need to obtain a state object.
-// Account values can be accessed and modified through the object.
-// Finally, call commitTrie to write the modified storage trie into a database.
+// - First you need to obtain a state object.
+// - Account values as well as storages can be accessed and modified through the object.
+// - Finally, call commit to return the changes of storage trie and update account data.
 type stateObject struct {
 	db       *StateDB
 	address  common.Address      // address of ethereum account
@@ -68,20 +68,16 @@ type stateObject struct {
 	origin   *types.StateAccount // Account original data without any change applied, nil means it was not existent
 	data     types.StateAccount  // Account data with all mutations applied in the scope of block
 
-	rootCorrected bool // To indicate whether the root has been corrected in pipecommit mode
-
 	// Write caches.
-	trie                Trie      // storage trie, which becomes non-nil on first access
-	code                Code      // contract bytecode, which gets set when code is loaded
+	trie Trie // storage trie, which becomes non-nil on first access
+	code Code // contract bytecode, which gets set when code is loaded
+
 	sharedOriginStorage *sync.Map // Point to the entry of the stateObject in sharedPool
-	originStorage       Storage   // Storage cache of original entries to dedup rewrites, reset for every transaction
+	originStorage       Storage   // Storage cache of original entries to dedup rewrites
 	pendingStorage      Storage   // Storage entries that need to be flushed to disk, at the end of an entire block
-	dirtyStorage        Storage   // Storage entries that have been modified in the current transaction execution
-	fakeStorage         Storage   // Fake storage which constructed by caller for debugging purpose.
+	dirtyStorage        Storage   // Storage entries that have been modified in the current transaction execution, reset for every transaction
 
 	// Cache flags.
-	// When an object is marked suicided it will be deleted from the trie
-	// during the "update" phase of the state transition.
 	dirtyCode bool // true if the code was updated
 
 	// Flag whether the account was marked as self-destructed. The self-destructed account
@@ -164,10 +160,8 @@ func (s *stateObject) touch() {
 func (s *stateObject) getTrie() (Trie, error) {
 	if s.trie == nil {
 		// Try fetching from prefetcher first
-		// We don't prefetch empty tries
 		if s.data.Root != types.EmptyRootHash && s.db.prefetcher != nil {
-			// When the miner is creating the pending state, there is no
-			// prefetcher
+			// When the miner is creating the pending state, there is no prefetcher
 			s.trie = s.db.prefetcher.trie(s.addrHash, s.data.Root)
 		}
 		if s.trie == nil {
@@ -182,10 +176,7 @@ func (s *stateObject) getTrie() (Trie, error) {
 }
 
 // GetState retrieves a value from the account storage trie.
-func (s *stateObject) GetState(key common.Hash) common.Hash { // If the fake storage is set, only lookup the state here(in the debugging mode)
-	if s.fakeStorage != nil {
-		return s.fakeStorage[key]
-	}
+func (s *stateObject) GetState(key common.Hash) common.Hash {
 	// If we have a dirty value for this state entry, return it
 	value, dirty := s.dirtyStorage[key]
 	if dirty {
@@ -221,10 +212,6 @@ func (s *stateObject) setOriginStorage(key common.Hash, value common.Hash) {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (s *stateObject) GetCommittedState(key common.Hash) common.Hash {
-	// If the fake storage is set, only lookup the state here(in the debugging mode)
-	if s.fakeStorage != nil {
-		return s.fakeStorage[key]
-	}
 	// If we have a pending write or clean cached, return that
 	if value, pending := s.pendingStorage[key]; pending {
 		return value

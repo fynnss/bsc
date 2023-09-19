@@ -670,7 +670,7 @@ func (t *Trie) Commit(onleaf triestate.LeafCallback) (common.Hash, *trienode.Nod
 	}
 
 	t.root = newRoot
-	return rootHash, nodes, nil // ???? Rick
+	return rootHash, nodes, nil
 }
 
 // hashRoot calculates the root hash of the given trie

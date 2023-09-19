@@ -35,12 +35,12 @@ import (
 
 // Config defines all necessary options for database.
 type Config struct {
-	Preimages bool           // Flag whether the preimage of node key is recorded
-	HashDB    *hashdb.Config // Configs for hash-based scheme
-	PathDB    *pathdb.Config // Configs for experimental path-based scheme
-
-	Cache   int // Memory allowance (MB) to use for caching trie nodes in memory
 	NoTries bool
+	Cache     int            // Memory allowance (MB) to use for caching trie nodes in memory
+	Preimages bool           // Flag whether the preimage of node key is recorded
+	PathDB    *pathdb.Config // Configs for experimental path-based scheme
+	HashDB    *hashdb.Config // Configs for hash-based scheme
+
 	// Testing hooks
 	OnCommit func(states *triestate.Set) // Hook invoked when commit is performed
 }

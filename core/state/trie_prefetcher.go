@@ -38,10 +38,10 @@ var (
 )
 
 type prefetchMsg struct {
-	owner       common.Hash
-	root        common.Hash
-	addr        common.Address
-	keys        [][]byte
+	owner common.Hash
+	root  common.Hash
+	addr  common.Address
+	keys  [][]byte
 }
 
 // triePrefetcher is an active prefetcher, which receives accounts or storage
@@ -50,11 +50,11 @@ type prefetchMsg struct {
 //
 // Note, the prefetcher's API is not thread safe.
 type triePrefetcher struct {
-	db       Database               // Database to fetch trie nodes through
-	root     common.Hash            // Root hash of the account trie for metrics
-	rootParent common.Hash                 //Root has of the account trie from block before the prvious one, designed for pipecommit mode
-	fetches  map[string]Trie        // Partially or fully fetcher tries
-	fetchers map[string]*subfetcher // Subfetchers for each trie
+	db         Database               // Database to fetch trie nodes through
+	root       common.Hash            // Root hash of the account trie for metrics
+	rootParent common.Hash            // Root has of the account trie from block before the prvious one, designed for pipecommit mode
+	fetches    map[string]Trie        // Partially or fully fetcher tries
+	fetchers   map[string]*subfetcher // Subfetchers for each trie
 
 	abortChan         chan *subfetcher // to abort a single subfetcher and its children
 	closed            int32
@@ -83,10 +83,10 @@ type triePrefetcher struct {
 func newTriePrefetcher(db Database, root, rootParent common.Hash, namespace string) *triePrefetcher {
 	prefix := triePrefetchMetricsPrefix + namespace
 	p := &triePrefetcher{
-		db:       db,
-		root:     root,
+		db:         db,
+		root:       root,
 		rootParent: rootParent,
-		fetchers: make(map[string]*subfetcher), // Active prefetchers use the fetchers map
+		fetchers:   make(map[string]*subfetcher), // Active prefetchers use the fetchers map
 		abortChan:  make(chan *subfetcher, abortChanSize),
 
 		closeMainChan:     make(chan struct{}),
@@ -120,7 +120,7 @@ func (p *triePrefetcher) mainLoop() {
 		select {
 		case pMsg := <-p.prefetchChan:
 			id := p.trieID(pMsg.owner, pMsg.root)
-        		fetcher := p.fetchers[id]
+			fetcher := p.fetchers[id]
 			if fetcher == nil {
 				fetcher = newSubfetcher(p.db, p.root, pMsg.owner, pMsg.root, pMsg.addr)
 				p.fetchersMutex.Lock()
