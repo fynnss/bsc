@@ -11,7 +11,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -72,10 +71,10 @@ func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
 func (h2p *Hash2Path) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
 		rawdb.WriteAccountTrieNode(h2p.db.DiskDB(), pathKey, n.Blob)
-		fmt.Println("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		// fmt.Println("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	} else {
 		rawdb.WriteStorageTrieNode(h2p.db.DiskDB(), owner, pathKey, n.Blob)
-		fmt.Println("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		// fmt.Println("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	}
 	// if delete the nodes of the account trie here, the error will occur when open storage trie.
 	// rawdb.DeleteTrieNode(h2p.db.DiskDB(), owner, nil, n.Hash, rawdb.HashScheme)
@@ -185,7 +184,7 @@ func (h2p *Hash2Path) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 			log.Error("New Storage trie error", "err", err, "root", account.Root.String(), "owner", ownerAddress.String())
 			break
 		}
-		log.Info("Find Contract Trie Tree, rootHash: ", tr.Hash().String(), "")
+		// log.Info("Find Contract Trie Tree, rootHash: ", tr.Hash().String(), "")
 		h2p.wg.Add(1)
 		go h2p.SubConcurrentTraversal(tr, tr.root, []byte{})
 	default:
