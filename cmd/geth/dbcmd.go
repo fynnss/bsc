@@ -39,6 +39,7 @@ import (
 	"github.com/ethereum/go-ethereum/internal/flags"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/trie/triedb/aggpathdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 	"github.com/olekukonko/tablewriter"
 	"github.com/urfave/cli/v2"
@@ -638,6 +639,39 @@ func dbTrieGet(ctx *cli.Context) error {
 		} else {
 			log.Error("args too much")
 		}
+	} else if scheme == rawdb.AggPathScheme {
+		var (
+			pathKey      []byte
+			owner        []byte
+			err          error
+			aggNodeBytes []byte
+			aggNode      *aggpathdb.AggNode
+		)
+		if ctx.NArg() == 1 {
+			pathKey, err = hexutil.Decode(ctx.Args().Get(0))
+			if err != nil {
+				log.Error("Could not decode the value", "error", err)
+				return err
+			}
+			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggNodeBytes = rawdb.ReadAccountTrieAggNode(db, aggPathKey)
+		} else if ctx.NArg() == 2 {
+			owner, err = hexutil.Decode(ctx.Args().Get(0))
+			if err != nil {
+				log.Info("Could not decode the value", "error", err)
+				return err
+			}
+			pathKey, err = hexutil.Decode(ctx.Args().Get(1))
+			if err != nil {
+				log.Info("Could not decode the value", "error", err)
+				return err
+			}
+			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggNodeBytes = rawdb.ReadStorageTrieAggNode(db, common.BytesToHash(owner), aggPathKey)
+		}
+		aggNode, err = aggpathdb.DecodeAggNode(aggNodeBytes)
+		node := aggNode.Node(pathKey)
+		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "HashKey: ", node.Hash, "node: ", trie.NodeString(node.Hash.Bytes(), node.Blob))
 	}
 
 	return nil
@@ -699,6 +733,32 @@ func dbTrieDelete(ctx *cli.Context) error {
 			}
 		} else {
 			log.Error("args too much")
+		}
+	} else if scheme == rawdb.AggPathScheme {
+		var (
+			pathKey []byte
+			owner   []byte
+			err     error
+		)
+		if ctx.NArg() == 1 {
+			pathKey, err = hexutil.Decode(ctx.Args().Get(0))
+			if err != nil {
+				log.Info("Could not decode the value", "error", err)
+				return err
+			}
+			aggpathdb.DeleteTrieNodeFromAggNode(db, db, common.Hash{}, pathKey)
+		} else if ctx.NArg() == 2 {
+			owner, err = hexutil.Decode(ctx.Args().Get(0))
+			if err != nil {
+				log.Info("Could not decode the value", "error", err)
+				return err
+			}
+			pathKey, err = hexutil.Decode(ctx.Args().Get(1))
+			if err != nil {
+				log.Info("Could not decode the value", "error", err)
+				return err
+			}
+			aggpathdb.DeleteTrieNodeFromAggNode(db, db, common.BytesToHash(owner), pathKey)
 		}
 	}
 	return nil
@@ -1007,6 +1067,10 @@ func showMetaData(ctx *cli.Context) error {
 		data = append(data, []string{"headHeader.Hash", fmt.Sprintf("%v", h.Hash())})
 		data = append(data, []string{"headHeader.Root", fmt.Sprintf("%v", h.Root)})
 		data = append(data, []string{"headHeader.Number", fmt.Sprintf("%d (%#x)", h.Number, h.Number)})
+	}
+	if rawdb.ReadStateScheme(db) != rawdb.HashScheme {
+		stateID := rawdb.ReadPersistentStateID(db)
+		data = append(data, []string{"PersistStateID", fmt.Sprintf("%d", stateID)})
 	}
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{"Field", "Value"})

@@ -42,6 +42,7 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/msgrate"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/trie/triedb"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"golang.org/x/crypto/sha3"
 )
@@ -754,7 +755,7 @@ func (s *Syncer) loadSyncStatus() {
 				}
 				options := trie.NewStackTrieOptions()
 				options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-					rawdb.WriteTrieNode(task.genBatch, common.Hash{}, path, hash, blob, s.scheme)
+					triedb.WriteTrieNode(task.genBatch, s.db, common.Hash{}, path, hash, blob, s.scheme)
 				})
 				if s.scheme == rawdb.PathScheme {
 					// Configure the dangling node cleaner and also filter out boundary nodes
@@ -781,7 +782,7 @@ func (s *Syncer) loadSyncStatus() {
 						owner := accountHash // local assignment for stacktrie writer closure
 						options := trie.NewStackTrieOptions()
 						options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-							rawdb.WriteTrieNode(subtask.genBatch, owner, path, hash, blob, s.scheme)
+							triedb.WriteTrieNode(subtask.genBatch, s.db, owner, path, hash, blob, s.scheme)
 						})
 						if s.scheme == rawdb.PathScheme {
 							// Configure the dangling node cleaner and also filter out boundary nodes
@@ -848,7 +849,7 @@ func (s *Syncer) loadSyncStatus() {
 		}
 		options := trie.NewStackTrieOptions()
 		options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-			rawdb.WriteTrieNode(batch, common.Hash{}, path, hash, blob, s.scheme)
+			triedb.WriteTrieNode(batch, s.db, common.Hash{}, path, hash, blob, s.scheme)
 		})
 		if s.scheme == rawdb.PathScheme {
 			// Configure the dangling node cleaner and also filter out boundary nodes
@@ -1894,7 +1895,7 @@ func (s *Syncer) processAccountResponse(res *accountResponse) {
 		}
 		// Check if the account is a contract with an unknown storage trie
 		if account.Root != types.EmptyRootHash {
-			if !rawdb.HasTrieNode(s.db, res.hashes[i], nil, account.Root, s.scheme) {
+			if !triedb.HasTrieNode(s.db, res.hashes[i], nil, account.Root, s.scheme) {
 				// If there was a previous large state retrieval in progress,
 				// don't restart it from scratch. This happens if a sync cycle
 				// is interrupted and resumed later. However, *do* update the
@@ -2069,7 +2070,7 @@ func (s *Syncer) processStorageResponse(res *storageResponse) {
 					owner := account // local assignment for stacktrie writer closure
 					options := trie.NewStackTrieOptions()
 					options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-						rawdb.WriteTrieNode(batch, owner, path, hash, blob, s.scheme)
+						triedb.WriteTrieNode(batch, s.db, owner, path, hash, blob, s.scheme)
 					})
 					if s.scheme == rawdb.PathScheme {
 						options = options.WithCleaner(func(path []byte) {
@@ -2093,10 +2094,6 @@ func (s *Syncer) processStorageResponse(res *storageResponse) {
 								s.storageBytes += common.StorageSize(len(key) + len(value))
 							},
 						}
-						options := trie.NewStackTrieOptions()
-						options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-							rawdb.WriteTrieNode(batch, owner, path, hash, blob, s.scheme)
-						})
 						if s.scheme == rawdb.PathScheme {
 							// Configure the dangling node cleaner and also filter out boundary nodes
 							// only in the context of the path scheme. Deletion is forbidden in the
@@ -2161,7 +2158,7 @@ func (s *Syncer) processStorageResponse(res *storageResponse) {
 			// no need to make local reassignment of account: this closure does not outlive the loop
 			options := trie.NewStackTrieOptions()
 			options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-				rawdb.WriteTrieNode(batch, account, path, hash, blob, s.scheme)
+				triedb.WriteTrieNode(batch, s.db, common.Hash{}, path, hash, blob, s.scheme)
 			})
 			if s.scheme == rawdb.PathScheme {
 				// Configure the dangling node cleaner only in the context of the

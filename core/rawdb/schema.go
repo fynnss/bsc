@@ -126,6 +126,10 @@ var (
 	trieNodeStoragePrefix = []byte("O") // trieNodeStoragePrefix + accountHash + hexPath -> trie node
 	stateIDPrefix         = []byte("L") // stateIDPrefix + state root -> state id
 
+	// Agg-Path-based storage scheme of merkle patricia trie.
+	aggTrieNodeAccountPrefix = []byte("M") // aggTrieNodeAccountPrefix + hexPath -> agg trie node
+	aggTrieNodeStoragePrefix = []byte("G") // aggTrieNodeAccountPrefix + account Hash + hexPath -> agg trie node
+
 	PreimagePrefix = []byte("secure-key-")       // PreimagePrefix + hash -> preimage
 	configPrefix   = []byte("ethereum-config-")  // config prefix for the db
 	genesisPrefix  = []byte("ethereum-genesis-") // genesis state prefix for the db
@@ -285,6 +289,22 @@ func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
 	return buf
 }
 
+// accountTrieAggNodeKey = aggTrieNodeAccountPrefix + nodePath.
+func accountTrieAggNodeKey(path []byte) []byte {
+	if len(path)%2 != 0 {
+		panic("The path is not even length")
+	}
+	return append(aggTrieNodeAccountPrefix, path...)
+}
+
+// storageTrieAggNodeKey = aggTrieNodeStoragePrefix + accountHash + nodePath
+func storageTrieAggNodeKey(accountHash common.Hash, path []byte) []byte {
+	if len(path)%2 != 0 {
+		panic("The path is not even length")
+	}
+	return append(append(aggTrieNodeStoragePrefix, accountHash.Bytes()...), path...)
+}
+
 // IsLegacyTrieNode reports whether a provided database entry is a legacy trie
 // node. The characteristics of legacy trie node are:
 // - the key length is 32 bytes
@@ -343,5 +363,55 @@ func ResolveStorageTrieNode(key []byte) (bool, common.Hash, []byte) {
 // trie node in path-based state scheme.
 func IsStorageTrieNode(key []byte) bool {
 	ok, _, _ := ResolveStorageTrieNode(key)
+	return ok
+}
+
+// ResolveAccountTrieAggNodeKey reports whether a provided database entry is an
+// account trie node in aggregated-path-based state scheme, and returns the resolved
+// node path if so.
+func ResolveAccountTrieAggNodeKey(key []byte) (bool, []byte) {
+	if !bytes.HasPrefix(key, aggTrieNodeAccountPrefix) {
+		return false, nil
+	}
+	// The remaining key should only consist a hex node path
+	// whose length is in the range 0 to 64 (64 is excluded
+	// since leaves are always wrapped with shortNode).
+	if len(key) >= len(trieNodeAccountPrefix)+common.HashLength*2 {
+		return false, nil
+	}
+	return true, key[len(trieNodeAccountPrefix):]
+}
+
+// IsAccountTrieAggNode reports whether a provided database entry is an account
+// trie node in aggregated-path-based state scheme.
+func IsAccountTrieAggNode(key []byte) bool {
+	ok, _ := ResolveAccountTrieAggNodeKey(key)
+	return ok
+}
+
+// ResolveStorageTrieAggNode reports whether a provided database entry is a storage
+// trie node in aggregated-path-based state scheme, and returns the resolved account hash
+// and node path if so.
+func ResolveStorageTrieAggNode(key []byte) (bool, common.Hash, []byte) {
+	if !bytes.HasPrefix(key, aggTrieNodeStoragePrefix) {
+		return false, common.Hash{}, nil
+	}
+	// The remaining key consists of 2 parts:
+	// - 32 bytes account hash
+	// - hex node path whose length is in the range 0 to 64
+	if len(key) < len(aggTrieNodeStoragePrefix)+common.HashLength {
+		return false, common.Hash{}, nil
+	}
+	if len(key) >= len(aggTrieNodeStoragePrefix)+common.HashLength+common.HashLength*2 {
+		return false, common.Hash{}, nil
+	}
+	accountHash := common.BytesToHash(key[len(aggTrieNodeStoragePrefix) : len(aggTrieNodeStoragePrefix)+common.HashLength])
+	return true, accountHash, key[len(aggTrieNodeStoragePrefix)+common.HashLength:]
+}
+
+// IsStorageTrieAggNode reports whether a provided database entry is a storage
+// trie node in aggregated-path-based state scheme.
+func IsStorageTrieAggNode(key []byte) bool {
+	ok, _, _ := ResolveStorageTrieAggNode(key)
 	return ok
 }

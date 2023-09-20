@@ -24,6 +24,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/trie/triedb/aggpathdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/hashdb"
 	"github.com/ethereum/go-ethereum/trie/triedb/pathdb"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -35,8 +36,9 @@ type Config struct {
 	NoTries   bool
 	Preimages bool // Flag whether the preimage of node key is recorded
 	Cache     int
-	HashDB    *hashdb.Config // Configs for hash-based scheme
-	PathDB    *pathdb.Config // Configs for experimental path-based scheme
+	HashDB    *hashdb.Config    // Configs for hash-based scheme
+	PathDB    *pathdb.Config    // Configs for experimental path-based scheme
+	AggPathDB *aggpathdb.Config // Configs for experimental aggregated-path-based scheme
 
 	// Testing hooks
 	OnCommit func(states *triestate.Set) // Hook invoked when commit is performed
@@ -113,13 +115,19 @@ func NewDatabase(diskdb ethdb.Database, config *Config) *Database {
 			config = &Config{
 				PathDB: pathdb.Defaults,
 			}
+		} else if dbScheme == rawdb.AggPathScheme {
+			config = &Config{
+				AggPathDB: aggpathdb.Defaults,
+			}
 		} else {
 			config = HashDefaults
 		}
 	}
-	if config.PathDB == nil && config.HashDB == nil {
+	if config.PathDB == nil && config.AggPathDB == nil && config.HashDB == nil {
 		if dbScheme == rawdb.PathScheme {
 			config.PathDB = pathdb.Defaults
+		} else if dbScheme == rawdb.AggPathScheme {
+			config.AggPathDB = aggpathdb.Defaults
 		} else {
 			config.HashDB = hashdb.Defaults
 		}
@@ -139,25 +147,22 @@ func NewDatabase(diskdb ethdb.Database, config *Config) *Database {
 	 * 3. Last, use the default scheme, namely hash scheme
 	 */
 	if config.HashDB != nil {
-		if rawdb.ReadStateScheme(diskdb) == rawdb.PathScheme {
-			log.Warn("incompatible state scheme", "old", rawdb.PathScheme, "new", rawdb.HashScheme)
+		if strings.Compare(dbScheme, rawdb.HashScheme) != 0 && len(dbScheme) != 0 {
+			log.Debug("incompatible state scheme", "old", dbScheme, "new", rawdb.HashScheme)
 		}
 		db.backend = hashdb.New(diskdb, config.HashDB, mptResolver{})
 	} else if config.PathDB != nil {
-		if rawdb.ReadStateScheme(diskdb) == rawdb.HashScheme {
-			log.Warn("incompatible state scheme", "old", rawdb.HashScheme, "new", rawdb.PathScheme)
+		if strings.Compare(dbScheme, rawdb.PathScheme) != 0 && len(dbScheme) != 0 {
+			log.Debug("incompatible state scheme", "old", dbScheme, "new", rawdb.PathScheme)
 		}
 		db.backend = pathdb.New(diskdb, config.PathDB)
-	} else if strings.Compare(dbScheme, rawdb.PathScheme) == 0 {
-		if config.PathDB == nil {
-			config.PathDB = pathdb.Defaults
+	} else if config.AggPathDB != nil {
+		if strings.Compare(dbScheme, rawdb.AggPathScheme) != 0 && len(dbScheme) != 0 {
+			log.Debug("incompatible state scheme", "old", dbScheme, "new", rawdb.AggPathScheme)
 		}
-		db.backend = pathdb.New(diskdb, config.PathDB)
+		db.backend = aggpathdb.New(diskdb, config.AggPathDB)
 	} else {
-		if config.HashDB == nil {
-			config.HashDB = hashdb.Defaults
-		}
-		db.backend = hashdb.New(diskdb, config.HashDB, mptResolver{})
+		log.Crit("missing triedb config")
 	}
 	return db
 }
@@ -173,6 +178,8 @@ func (db *Database) Reader(blockRoot common.Hash) (Reader, error) {
 	case *hashdb.Database:
 		return b.Reader(blockRoot)
 	case *pathdb.Database:
+		return b.Reader(blockRoot)
+	case *aggpathdb.Database:
 		return b.Reader(blockRoot)
 	}
 	return nil, errors.New("unknown backend")
@@ -302,33 +309,63 @@ func (db *Database) Node(hash common.Hash) ([]byte, error) {
 // corresponding trie histories are existent. It's only supported by path-based
 // database and will return an error for others.
 func (db *Database) Recover(target common.Hash) error {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Recover(target, &trieLoader{db: db})
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Recover(target, &trieLoader{db: db})
+	} else {
 		return errors.New("not supported")
 	}
-	return pdb.Recover(target, &trieLoader{db: db})
 }
 
 // Recoverable returns the indicator if the specified state is enabled to be
 // recovered. It's only supported by path-based database and will return an
 // error for others.
 func (db *Database) Recoverable(root common.Hash) (bool, error) {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return false, errors.New("not supported")
+		}
+		return pdb.Recoverable(root), nil
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return false, errors.New("not supported")
+		}
+		return pdb.Recoverable(root), nil
+	} else {
 		return false, errors.New("not supported")
 	}
-	return pdb.Recoverable(root), nil
 }
 
 // Reset wipes all available journal from the persistent database and discard
 // all caches and diff layers. Using the given root to create a new disk layer.
 // It's only supported by path-based database and will return an error for others.
 func (db *Database) Reset(root common.Hash) error {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Reset(root)
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Reset(root)
+	} else {
 		return errors.New("not supported")
 	}
-	return pdb.Reset(root)
 }
 
 // Journal commits an entire diff hierarchy to disk into a single journal entry.
@@ -336,31 +373,62 @@ func (db *Database) Reset(root common.Hash) error {
 // flattening everything down (bad for reorgs). It's only supported by path-based
 // database and will return an error for others.
 func (db *Database) Journal(root common.Hash) error {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Journal(root)
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.Journal(root)
+	} else {
 		return errors.New("not supported")
 	}
-	return pdb.Journal(root)
 }
 
 // SetBufferSize sets the node buffer size to the provided value(in bytes).
 // It's only supported by path-based database and will return an error for
 // others.
 func (db *Database) SetBufferSize(size int) error {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.SetBufferSize(size)
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return errors.New("not supported")
+		}
+		return pdb.SetBufferSize(size)
+	} else {
 		return errors.New("not supported")
 	}
-	return pdb.SetBufferSize(size)
 }
 
 // Head return the top non-fork difflayer/disklayer root hash for rewinding.
 // It's only supported by path-based database and will return an error for
 // others.
 func (db *Database) Head() common.Hash {
-	pdb, ok := db.backend.(*pathdb.Database)
-	if !ok {
+	if db.backend.Scheme() == rawdb.PathScheme {
+		pdb, ok := db.backend.(*pathdb.Database)
+		if !ok {
+			return common.Hash{}
+		}
+		return pdb.Head()
+	} else if db.backend.Scheme() == rawdb.AggPathScheme {
+		pdb, ok := db.backend.(*aggpathdb.Database)
+		if !ok {
+			return common.Hash{}
+		}
+		return pdb.Head()
+	} else {
 		return common.Hash{}
 	}
-	return pdb.Head()
+
 }

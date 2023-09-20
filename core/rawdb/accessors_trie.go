@@ -17,13 +17,17 @@
 package rawdb
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
+	"github.com/cockroachdb/pebble"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/ethdb/memorydb"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/syndtr/goleveldb/leveldb"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -45,6 +49,11 @@ const HashScheme = "hash"
 // area of the disk with good data locality property. But this scheme needs to rely
 // on extra state diffs to survive deep reorg.
 const PathScheme = "path"
+
+// AggPathScheme is the new state scheme based on PathScheme. This scheme merge two
+// or more layers trie nodes and aims to improve the performance and reduce the disk space
+// of MPT.
+const AggPathScheme = "aggpath"
 
 // hasher is used to compute the sha256 hash of the provided data.
 type hasher struct{ sha crypto.KeccakState }
@@ -161,6 +170,80 @@ func DeleteStorageTrieNode(db ethdb.KeyValueWriter, accountHash common.Hash, pat
 	}
 }
 
+// ReadAccountTrieAggNode retrieves the account trie agg node and return the raw bytes
+func ReadAccountTrieAggNode(db ethdb.KeyValueReader, path []byte) []byte {
+	data, err := db.Get(accountTrieAggNodeKey(path))
+	if err != nil {
+		// When the load of leveldb is high, a non-not found error will occur, and if nil is returned at this time,
+		// the aggnode orig data will be lost. Panic here to avoid further data damaged.
+		if errors.Is(err, leveldb.ErrNotFound) ||
+			errors.Is(err, pebble.ErrNotFound) ||
+			errors.Is(err, memorydb.ErrMemorydbNotFound) {
+			return nil
+		} else {
+			panic(fmt.Sprintf("Failed to get storage agg node, error %v", err))
+		}
+	}
+	return data
+}
+
+// HasAccountTrieAggNode checks if the trie aggnode with the provided path is present in db.
+func HasAccountTrieAggNode(db ethdb.KeyValueReader, path []byte) bool {
+	ok, _ := db.Has(accountTrieAggNodeKey(path))
+	return ok
+}
+
+// WriteAccountTrieAggNode writes the provided account trie aggnode into database.
+func WriteAccountTrieAggNode(db ethdb.KeyValueWriter, path []byte, node []byte) {
+	if err := db.Put(accountTrieAggNodeKey(path), node); err != nil {
+		log.Crit("Failed to store account trie agg node", "err", err)
+	}
+}
+
+// DeleteAccountTrieAggNode deletes the specified account trie node from the database.
+func DeleteAccountTrieAggNode(db ethdb.KeyValueWriter, path []byte) {
+	if err := db.Delete(accountTrieAggNodeKey(path)); err != nil {
+		log.Crit("Failed to delete account trie agg node", "err", err)
+	}
+}
+
+// ReadStorageTrieAggNode retrieves the storage trie agg node and return the raw bytes
+func ReadStorageTrieAggNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) []byte {
+	data, err := db.Get(storageTrieAggNodeKey(accountHash, path))
+	if err != nil {
+		// When the load of leveldb is high, a non-not found error will occur, and if nil is returned at this time,
+		// the aggnode orig data will be lost. Panic here to avoid further data damaged.
+		if errors.Is(err, leveldb.ErrNotFound) ||
+			errors.Is(err, pebble.ErrNotFound) ||
+			errors.Is(err, memorydb.ErrMemorydbNotFound) {
+			return nil
+		} else {
+			panic(fmt.Sprintf("Failed to get storage agg node, error %v", err))
+		}
+	}
+	return data
+}
+
+// HasAccountTrieAggNode checks if the trie aggnode with the provided path is present in db.
+func HasStorageTrieAggNode(db ethdb.KeyValueReader, accountHash common.Hash, path []byte) bool {
+	ok, _ := db.Has(storageTrieAggNodeKey(accountHash, path))
+	return ok
+}
+
+// DeleteStorageTrieAggNode deletes the specified storage trie node from the database.
+func DeleteStorageTrieAggNode(db ethdb.KeyValueWriter, accountHash common.Hash, path []byte) {
+	if err := db.Delete(storageTrieAggNodeKey(accountHash, path)); err != nil {
+		log.Crit("Failed to delete storage trie agg node", "err", err)
+	}
+}
+
+// WriteStorageTrieAggNode writes the priovided storage trie aggnode into database
+func WriteStorageTrieAggNode(db ethdb.KeyValueWriter, accountHash common.Hash, path []byte, node []byte) {
+	if err := db.Put(storageTrieAggNodeKey(accountHash, path), node); err != nil {
+		log.Crit("Failed to store account trie agg node", "err", err)
+	}
+}
+
 // ReadLegacyTrieNode retrieves the legacy trie node with the given
 // associated node hash.
 func ReadLegacyTrieNode(db ethdb.KeyValueReader, hash common.Hash) []byte {
@@ -191,99 +274,6 @@ func DeleteLegacyTrieNode(db ethdb.KeyValueWriter, hash common.Hash) {
 	}
 }
 
-// HasTrieNode checks the trie node presence with the provided node info and
-// the associated node hash.
-func HasTrieNode(db ethdb.KeyValueReader, owner common.Hash, path []byte, hash common.Hash, scheme string) bool {
-	switch scheme {
-	case HashScheme:
-		return HasLegacyTrieNode(db, hash)
-	case PathScheme:
-		if owner == (common.Hash{}) {
-			return HasAccountTrieNode(db, path, hash)
-		}
-		return HasStorageTrieNode(db, owner, path, hash)
-	default:
-		panic(fmt.Sprintf("Unknown scheme %v", scheme))
-	}
-}
-
-// ReadTrieNode retrieves the trie node from database with the provided node info
-// and associated node hash.
-// hashScheme-based lookup requires the following:
-//   - hash
-//
-// pathScheme-based lookup requires the following:
-//   - owner
-//   - path
-func ReadTrieNode(db ethdb.KeyValueReader, owner common.Hash, path []byte, hash common.Hash, scheme string) []byte {
-	switch scheme {
-	case HashScheme:
-		return ReadLegacyTrieNode(db, hash)
-	case PathScheme:
-		var (
-			blob  []byte
-			nHash common.Hash
-		)
-		if owner == (common.Hash{}) {
-			blob, nHash = ReadAccountTrieNode(db, path)
-		} else {
-			blob, nHash = ReadStorageTrieNode(db, owner, path)
-		}
-		if nHash != hash {
-			return nil
-		}
-		return blob
-	default:
-		panic(fmt.Sprintf("Unknown scheme %v", scheme))
-	}
-}
-
-// WriteTrieNode writes the trie node into database with the provided node info
-// and associated node hash.
-// hashScheme-based lookup requires the following:
-//   - hash
-//
-// pathScheme-based lookup requires the following:
-//   - owner
-//   - path
-func WriteTrieNode(db ethdb.KeyValueWriter, owner common.Hash, path []byte, hash common.Hash, node []byte, scheme string) {
-	switch scheme {
-	case HashScheme:
-		WriteLegacyTrieNode(db, hash, node)
-	case PathScheme:
-		if owner == (common.Hash{}) {
-			WriteAccountTrieNode(db, path, node)
-		} else {
-			WriteStorageTrieNode(db, owner, path, node)
-		}
-	default:
-		panic(fmt.Sprintf("Unknown scheme %v", scheme))
-	}
-}
-
-// DeleteTrieNode deletes the trie node from database with the provided node info
-// and associated node hash.
-// hashScheme-based lookup requires the following:
-//   - hash
-//
-// pathScheme-based lookup requires the following:
-//   - owner
-//   - path
-func DeleteTrieNode(db ethdb.KeyValueWriter, owner common.Hash, path []byte, hash common.Hash, scheme string) {
-	switch scheme {
-	case HashScheme:
-		DeleteLegacyTrieNode(db, hash)
-	case PathScheme:
-		if owner == (common.Hash{}) {
-			DeleteAccountTrieNode(db, path)
-		} else {
-			DeleteStorageTrieNode(db, owner, path)
-		}
-	default:
-		panic(fmt.Sprintf("Unknown scheme %v", scheme))
-	}
-}
-
 // ReadStateScheme reads the state scheme of persistent state, or none
 // if the state is not present in database.
 func ReadStateScheme(db ethdb.Reader) string {
@@ -291,6 +281,11 @@ func ReadStateScheme(db ethdb.Reader) string {
 	blob, _ := ReadAccountTrieNode(db, nil)
 	if len(blob) != 0 {
 		return PathScheme
+	}
+	// Check if state in aggregated-path-based scheme is present
+	blob = ReadAccountTrieAggNode(db, nil)
+	if len(blob) != 0 {
+		return AggPathScheme
 	}
 	// In a hash-based scheme, the genesis state is consistently stored
 	// on the disk. To assess the scheme of the persistent state, it
@@ -309,7 +304,7 @@ func ReadStateScheme(db ethdb.Reader) string {
 // ValidateStateScheme used to check state scheme whether is valid.
 // Valid state scheme: hash and path.
 func ValidateStateScheme(stateScheme string) bool {
-	if stateScheme == HashScheme || stateScheme == PathScheme {
+	if stateScheme == HashScheme || stateScheme == PathScheme || stateScheme == AggPathScheme {
 		return true
 	}
 	return false

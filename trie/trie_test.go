@@ -35,6 +35,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie/triedb"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"golang.org/x/crypto/sha3"
 )
@@ -88,39 +89,39 @@ func TestMissingNode(t *testing.T) {
 
 func testMissingNode(t *testing.T, memonly bool, scheme string) {
 	diskdb := rawdb.NewMemoryDatabase()
-	triedb := newTestDatabase(diskdb, scheme)
+	trietestdb := newTestDatabase(diskdb, scheme)
 
-	trie := NewEmpty(triedb)
+	trie := NewEmpty(trietestdb)
 	updateString(trie, "120000", "qwerqwerqwerqwerqwerqwerqwerqwer")
 	updateString(trie, "123456", "asdfasdfasdfasdfasdfasdfasdfasdf")
 	root, nodes, _ := trie.Commit(false)
-	triedb.Update(root, types.EmptyRootHash, 0, trienode.NewWithNodeSet(nodes), nil)
+	trietestdb.Update(root, types.EmptyRootHash, 0, trienode.NewWithNodeSet(nodes), nil)
 
 	if !memonly {
-		triedb.Commit(root, false)
+		trietestdb.Commit(root, false)
 	}
 
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	_, err := trie.Get([]byte("120000"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	_, err = trie.Get([]byte("120099"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	_, err = trie.Get([]byte("123456"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	err = trie.Update([]byte("120099"), []byte("zxcvzxcvzxcvzxcvzxcvzxcvzxcvzxcv"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	err = trie.Delete([]byte("123456"))
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -136,11 +137,11 @@ func testMissingNode(t *testing.T, memonly bool, scheme string) {
 			break
 		}
 	}
-	trie, _ = New(TrieID(root), triedb)
+	trie, _ = New(TrieID(root), trietestdb)
 	if memonly {
 		trie.reader.banned = map[string]struct{}{string(path): {}}
 	} else {
-		rawdb.DeleteTrieNode(diskdb, common.Hash{}, path, hash, scheme)
+		triedb.DeleteTrieNode(diskdb, diskdb, common.Hash{}, path, hash, scheme)
 	}
 
 	_, err = trie.Get([]byte("120000"))
@@ -911,7 +912,7 @@ func TestCommitSequenceStackTrie(t *testing.T) {
 
 		options := NewStackTrieOptions()
 		options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-			rawdb.WriteTrieNode(stackTrieSponge, common.Hash{}, path, hash, blob, db.Scheme())
+			triedb.WriteTrieNode(stackTrieSponge, stackTrieSponge, common.Hash{}, path, hash, blob, db.Scheme())
 		})
 		stTrie := NewStackTrie(options)
 		// Fill the trie with elements
@@ -967,10 +968,15 @@ func TestCommitSequenceSmallRoot(t *testing.T) {
 	trie := NewEmpty(db)
 	// Another sponge is used for the stacktrie commits
 	stackTrieSponge := &spongeDb{sponge: sha3.NewLegacyKeccak256(), id: "b"}
+<<<<<<< HEAD
 
 	options := NewStackTrieOptions()
 	options = options.WithWriter(func(path []byte, hash common.Hash, blob []byte) {
 		rawdb.WriteTrieNode(stackTrieSponge, common.Hash{}, path, hash, blob, db.Scheme())
+=======
+	stTrie := NewStackTrie(func(owner common.Hash, path []byte, hash common.Hash, blob []byte) {
+		triedb.WriteTrieNode(stackTrieSponge, stackTrieSponge, owner, path, hash, blob, db.Scheme())
+>>>>>>> 608db8e0d (aggpathdb: add a new state scheme named agg-path)
 	})
 	stTrie := NewStackTrie(options)
 	// Add a single small-element to the trie(s)

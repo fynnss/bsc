@@ -36,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/trie/triedb/aggpathdb"
 	"github.com/fatih/structs"
 	pcsclite "github.com/gballet/go-libpcsclite"
 	gopsutil "github.com/shirou/gopsutil/mem"
@@ -329,7 +330,8 @@ var (
 	}
 	StateSchemeFlag = &cli.StringFlag{
 		Name:     "state.scheme",
-		Usage:    "Scheme to use for storing ethereum state ('hash' or 'path')",
+		Usage:    "Scheme to use for storing ethereum state ('hash', 'path' or 'aggpath')",
+		Value:    rawdb.HashScheme,
 		Category: flags.StateCategory,
 	}
 	PathDBSyncFlag = &cli.BoolFlag{
@@ -2441,9 +2443,19 @@ func MakeTrieDatabase(ctx *cli.Context, disk ethdb.Database, preimage bool, read
 		return trie.NewDatabase(disk, config)
 	}
 	if readOnly {
-		config.PathDB = pathdb.ReadOnly
+		if scheme == rawdb.PathScheme {
+			config.PathDB = pathdb.ReadOnly
+		}
+		if scheme == rawdb.AggPathScheme {
+			config.AggPathDB = aggpathdb.ReadOnly
+		}
 	} else {
-		config.PathDB = pathdb.Defaults
+		if scheme == rawdb.PathScheme {
+			config.PathDB = pathdb.Defaults
+		}
+		if scheme == rawdb.AggPathScheme {
+			config.AggPathDB = aggpathdb.Defaults
+		}
 	}
 	return trie.NewDatabase(disk, config)
 }

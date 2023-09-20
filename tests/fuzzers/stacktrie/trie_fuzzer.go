@@ -30,6 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ethereum/go-ethereum/trie/triedb"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/exp/slices"
@@ -140,9 +141,8 @@ func (f *fuzzer) fuzz() int {
 		trieA   = trie.NewEmpty(dbA)
 		spongeB = &spongeDb{sponge: sha3.NewLegacyKeccak256()}
 		dbB     = trie.NewDatabase(rawdb.NewDatabase(spongeB), nil)
-
 		options = trie.NewStackTrieOptions().WithWriter(func(path []byte, hash common.Hash, blob []byte) {
-			rawdb.WriteTrieNode(spongeB, common.Hash{}, path, hash, blob, dbB.Scheme())
+			triedb.WriteTrieNode(spongeB, spongeB, common.Hash{}, path, hash, blob, dbB.Scheme())
 		})
 		trieB       = trie.NewStackTrie(options)
 		vals        []kv

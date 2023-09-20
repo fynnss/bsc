@@ -14,104 +14,52 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package pathdb
+package aggpathdb
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
-	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 	"github.com/ethereum/go-ethereum/trie/triestate"
 	"golang.org/x/crypto/sha3"
+	"golang.org/x/sync/semaphore"
 )
-
-// trienodebuffer is a collection of modified trie nodes to aggregate the disk
-// write. The content of the trienodebuffer must be checked before diving into
-// disk (since it basically is not-yet-written data).
-type trienodebuffer interface {
-	// node retrieves the trie node with given node info.
-	node(owner common.Hash, path []byte, hash common.Hash) (*trienode.Node, error)
-
-	// commit merges the dirty nodes into the trienodebuffer. This operation won't take
-	// the ownership of the nodes map which belongs to the bottom-most diff layer.
-	// It will just hold the node references from the given map which are safe to
-	// copy.
-	commit(nodes map[common.Hash]map[string]*trienode.Node) trienodebuffer
-
-	// revert is the reverse operation of commit. It also merges the provided nodes
-	// into the trienodebuffer, the difference is that the provided node set should
-	// revert the changes made by the last state transition.
-	revert(db ethdb.KeyValueReader, nodes map[common.Hash]map[string]*trienode.Node) error
-
-	// flush persists the in-memory dirty trie node into the disk if the configured
-	// memory threshold is reached. Note, all data must be written atomically.
-	flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, force bool) error
-
-	// setSize sets the buffer size to the provided number, and invokes a flush
-	// operation if the current memory usage exceeds the new limit.
-	setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error
-
-	// reset cleans up the disk cache.
-	reset()
-
-	// empty returns an indicator if trienodebuffer contains any state transition inside.
-	empty() bool
-
-	// getSize return the trienodebuffer used size.
-	getSize() (uint64, uint64)
-
-	// getAllNodes return all the trie nodes are cached in trienodebuffer.
-	getAllNodes() map[common.Hash]map[string]*trienode.Node
-
-	// getLayers return the size of cached difflayers.
-	getLayers() uint64
-
-	// waitAndStopFlushing will block unit writing the trie nodes of trienodebuffer to disk.
-	waitAndStopFlushing()
-}
-
-func NewTrieNodeBuffer(sync bool, limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) trienodebuffer {
-	if sync {
-		log.Info("new sync node buffer", "limit", common.StorageSize(limit), "layers", layers)
-		return newNodeBuffer(limit, nodes, layers)
-	}
-	log.Info("new async node buffer", "limit", common.StorageSize(limit), "layers", layers)
-	return newAsyncNodeBuffer(limit, nodes, layers)
-}
 
 // diskLayer is a low level persistent layer built on top of a key-value store.
 type diskLayer struct {
-	root   common.Hash      // Immutable, root hash to which this layer was made for
-	id     uint64           // Immutable, corresponding state id
-	db     *Database        // Path-based trie database
-	cleans *fastcache.Cache // GC friendly memory cache of clean node RLPs
-	buffer trienodebuffer   // Node buffer to aggregate writes
-	stale  bool             // Signals that the layer became stale (state progressed)
-	lock   sync.RWMutex     // Lock used to protect stale flag
+	root            common.Hash    // Immutable, root hash to which this layer was made for
+	id              uint64         // Immutable, corresponding state id
+	db              *Database      // Agg-Path-based trie database
+	cleans          *aggNodeCache  // GC friendly memory cache of clean agg node RLPs
+	buffer          *aggNodeBuffer // Agg node buffer to aggregate writes
+	immutableBuffer *aggNodeBuffer // Agg node buffer to aggregate writes
+	stale           bool           // Signals that the layer became stale (state progressed)
+	lock            sync.RWMutex   // Lock used to protect stale flag
 }
 
 // newDiskLayer creates a new disk layer based on the passing arguments.
-func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *fastcache.Cache, buffer trienodebuffer) *diskLayer {
+func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *aggNodeCache, buffer *aggNodeBuffer, immutableBuffer *aggNodeBuffer) *diskLayer {
 	// Initialize a clean cache if the memory allowance is not zero
 	// or reuse the provided cache if it is not nil (inherited from
 	// the original disk layer).
 	if cleans == nil && db.config.CleanCacheSize != 0 {
-		cleans = fastcache.New(db.config.CleanCacheSize)
+		cleans = newAggNodeCache(db, nil, db.config.CleanCacheSize)
 	}
 	return &diskLayer{
-		root:   root,
-		id:     id,
-		db:     db,
-		cleans: cleans,
-		buffer: buffer,
+		root:            root,
+		id:              id,
+		db:              db,
+		cleans:          cleans,
+		buffer:          buffer,
+		immutableBuffer: immutableBuffer,
 	}
 }
 
@@ -175,51 +123,29 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		dirtyReadMeter.Mark(int64(len(n.Blob)))
 		return n.Blob, nil
 	}
+	nodeBufferTimer.UpdateSince(start)
+
+	immustart := time.Now()
+	n, err = dl.immutableBuffer.node(owner, path, hash)
+	if err != nil {
+		return nil, err
+	}
+
+	if n != nil {
+		dirtyHitMeter.Mark(1)
+		dirtyReadMeter.Mark(int64(len(n.Blob)))
+		return n.Blob, nil
+	}
 	dirtyMissMeter.Mark(1)
+	nodeImmuBufferTimer.UpdateSince(immustart)
 
-	// Try to retrieve the trie node from the clean memory cache
-	key := cacheKey(owner, path)
-	if dl.cleans != nil {
-		start1 := time.Now()
-		if blob := dl.cleans.Get(nil, key); len(blob) > 0 {
-			h := newHasher()
-			defer h.release()
+	// Try to retrieve the trie node from the agg node cache.
+	blob, err := dl.cleans.node(owner, path, hash)
+	if err != nil {
+		return nil, err
+	}
 
-			got := h.hash(blob)
-			if got == hash {
-				cleanHitMeter.Mark(1)
-				cleanReadMeter.Mark(int64(len(blob)))
-				return blob, nil
-			}
-			cleanFalseMeter.Mark(1)
-			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", got)
-		}
-		cleanMissMeter.Mark(1)
-		nodeCleanCacheTimer.UpdateSince(start1)
-	}
-	// Try to retrieve the trie node from the disk.
-	diskStart := time.Now()
-	defer nodeDiskTimer.UpdateSince(diskStart)
-
-	var (
-		nBlob []byte
-		nHash common.Hash
-	)
-	if owner == (common.Hash{}) {
-		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
-	} else {
-		nBlob, nHash = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
-	}
-	if nHash != hash {
-		diskFalseMeter.Mark(1)
-		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
-		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
-	}
-	if dl.cleans != nil && len(nBlob) > 0 {
-		dl.cleans.Set(key, nBlob)
-		cleanWriteMeter.Mark(int64(len(nBlob)))
-	}
-	return nBlob, nil
+	return blob, nil
 }
 
 // update implements the layer interface, returning a new diff layer on top
@@ -235,9 +161,13 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
 
-	// Construct and store the state history first. If crash happens after storing
-	// the state history but without flushing the corresponding states(journal),
-	// the stored state history will be truncated from head in the next restart.
+	start := time.Now()
+	defer commitTimeTimer.UpdateSince(start)
+
+	// Construct and store the state history first. If crash happens
+	// after storing the state history but without flushing the
+	// corresponding states(journal), the stored state history will
+	// be truncated in the next restart.
 	var (
 		overflow bool
 		oldest   uint64
@@ -259,21 +189,20 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 			oldest = bottom.stateID() - limit + 1 // track the id of history **after truncation**
 		}
 	}
+	commitWriteHistoryTimeTimer.UpdateSince(start)
 	// Mark the diskLayer as stale before applying any mutations on top.
 	dl.stale = true
 
-	// Store the root->id lookup afterwards. All stored lookups are identified
-	// by the **unique** state root. It's impossible that in the same chain
-	// blocks are not adjacent but have the same root.
+	// Store the root->id lookup afterwards. All stored lookups are
+	// identified by the **unique** state root. It's impossible that
+	// in the same chain blocks are not adjacent but have the same
+	// root.
+	batch := dl.db.diskdb.NewBatch()
 	if dl.id == 0 {
-		rawdb.WriteStateID(dl.db.diskdb, dl.root, 0)
+		rawdb.WriteStateID(batch, dl.root, 0)
 	}
-	rawdb.WriteStateID(dl.db.diskdb, bottom.rootHash(), bottom.stateID())
-
-	// Construct a new disk layer by merging the nodes from the provided diff
-	// layer, and flush the content in disk layer if there are too many nodes
-	// cached. The clean cache is inherited from the original disk layer.
-	ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes))
+	rawdb.WriteStateID(batch, bottom.rootHash(), bottom.stateID())
+	commitWriteStateIDTimeTimer.UpdateSince(start)
 
 	// In a unique scenario where the ID of the oldest history object (after tail
 	// truncation) surpasses the persisted state ID, we take the necessary action
@@ -282,19 +211,71 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	if !force && rawdb.ReadPersistentStateID(dl.db.diskdb) < oldest {
 		force = true
 	}
-	if err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force); err != nil {
-		return nil, err
-	}
+	// Construct a new disk layer by merging the aggNodes from the provided
+	// diff layer, and flush the content in disk layer if there are too
+	// many aggNodes cached. The clean cache is inherited from the original
+	// disk layer for reusing.
+	var ndl *diskLayer
+	dl.commitNodes(bottom.aggnodes)
+	commitCommitNodesTimeTimer.UpdateSince(start)
+
 	// To remove outdated history objects from the end, we set the 'tail' parameter
 	// to 'oldest-1' due to the offset between the freezer index and the history ID.
 	if overflow {
-		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
+		pruned, err := truncateFromTail(batch, dl.db.freezer, oldest-1)
 		if err != nil {
 			return nil, err
 		}
 		log.Debug("Pruned state history", "items", pruned, "tailid", oldest)
 	}
+	commitTruncateHistoryTimer.UpdateSince(start)
+
+	if dl.buffer.canFlush(force) && dl.immutableBuffer.empty() {
+		// keep aggnodes in memory until next switch
+		dl.immutableBuffer.aggNodes = make(map[common.Hash]map[string]*AggNode)
+		ndl = newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.immutableBuffer, dl.buffer)
+		if force {
+			err := ndl.immutableBuffer.flush(ndl.db.diskdb, batch, ndl.cleans, ndl.id)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			go func() {
+				err := ndl.immutableBuffer.flush(ndl.db.diskdb, batch, ndl.cleans, ndl.id)
+				if err != nil {
+					panic(fmt.Sprintf("Immutable buffer flush error %v", err))
+				}
+			}()
+		}
+	} else {
+		go func() {
+			err := batch.Write()
+			if err != nil {
+				panic(err)
+			}
+			batch.Reset()
+		}()
+		ndl = newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer, dl.immutableBuffer)
+	}
+
+	commitFlushTimer.UpdateSince(start)
 	return ndl, nil
+}
+
+func (dl *diskLayer) allAggNodes() map[common.Hash]map[string]*AggNode {
+	for owner, subset := range dl.immutableBuffer.aggNodes {
+		if _, ok := dl.buffer.aggNodes[owner]; !ok {
+			dl.buffer.aggNodes[owner] = subset
+		} else {
+			for aggpath, aggnode := range subset {
+				if _, ok := dl.buffer.aggNodes[owner][aggpath]; !ok {
+					dl.buffer.aggNodes[owner][aggpath] = aggnode
+				}
+			}
+		}
+	}
+	dl.immutableBuffer.reset()
+	return dl.buffer.aggNodes
 }
 
 // revert applies the given state history and return a reverted disk layer.
@@ -324,28 +305,122 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 
 	dl.stale = true
 
+	aggnodes := aggregatedNodes(nodes)
 	// State change may be applied to node buffer, or the persistent
 	// state, depends on if node buffer is empty or not. If the node
 	// buffer is not empty, it means that the state transition that
 	// needs to be reverted is not yet flushed and cached in node
 	// buffer, otherwise, manipulate persistent state directly.
 	if !dl.buffer.empty() {
-		err := dl.buffer.revert(dl.db.diskdb, nodes)
+		dl.commitNodes(aggnodes)
+		err := dl.buffer.revert(dl.db.diskdb, dl.buffer.aggNodes)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		batch := dl.db.diskdb.NewBatch()
-		writeNodes(batch, nodes, dl.cleans)
+		dl.commitNodes(aggnodes)
+		writeAggNodes(dl.cleans, batch, dl.buffer.aggNodes)
 		rawdb.WritePersistentStateID(batch, dl.id-1)
 		if err := batch.Write(); err != nil {
 			log.Crit("Failed to write states", "err", err)
 		}
 	}
-	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer), nil
+	return newDiskLayer(h.meta.parent, dl.id-1, dl.db, dl.cleans, dl.buffer, dl.immutableBuffer), nil
 }
 
-// setBufferSize sets the trie node buffer size to the provided value.
+func (dl *diskLayer) commitNodes(aggnodes map[common.Hash]map[string]*AggNode) {
+	var (
+		delta         int64
+		overwrite     int64
+		overwriteSize int64
+	)
+	wg := sync.WaitGroup{}
+	asyncAggNodes := make(map[common.Hash]map[string]*AggNode)
+	asynclock := sync.Mutex{}
+	asyncDelta := int64(0)
+	sem := semaphore.NewWeighted(int64(4096))
+	for owner, subset := range aggnodes {
+		current, exist := dl.buffer.aggNodes[owner]
+		if !exist {
+			current = make(map[string]*AggNode)
+		}
+		for aggpath, deltan := range subset {
+			start := time.Now()
+			aggnode, ok := current[aggpath]
+			if !ok {
+				immuAggnode, immuok := dl.immutableBuffer.aggNode(owner, []byte(aggpath))
+				if !immuok {
+					wg.Add(1)
+					d := deltan
+					ap := []byte(aggpath)
+					go func(dan *AggNode, owner common.Hash, aggPath []byte) {
+						_ = sem.Acquire(context.Background(), 1)
+						defer sem.Release(1)
+						// retrieve aggnode from clean cache and disk
+						cleanAggNode, err1 := dl.cleans.aggNode(owner, aggPath)
+						if err1 != nil {
+							panic(fmt.Sprintf("decode agg node failed from clean cache, err: %v", err1))
+						}
+						if cleanAggNode == nil {
+							cleanAggNode = &AggNode{}
+						}
+						cleanAggNode.Merge(dan)
+						asynclock.Lock()
+						if _, ok2 := asyncAggNodes[owner]; !ok2 {
+							asyncAggNodes[owner] = make(map[string]*AggNode)
+						}
+						asyncAggNodes[owner][string(aggPath)] = cleanAggNode
+						asyncDelta += int64(cleanAggNode.Size() + len(aggpath))
+						asynclock.Unlock()
+						wg.Done()
+					}(d, owner, ap)
+					continue
+				} else {
+					aggnode = immuAggnode.copy()
+					current[aggpath] = aggnode
+					aggNodeHitImmuBufferMeter.Mark(1)
+					aggNodeTimeImmuBufferTimer.UpdateSince(start)
+				}
+			} else {
+				aggNodeHitBufferMeter.Mark(1)
+				aggNodeTimeBufferTimer.UpdateSince(start)
+			}
+			oldSize := aggnode.Size()
+			aggnode.Merge(deltan)
+			newSize := aggnode.Size()
+
+			if ok {
+				overwrite++
+				overwriteSize += int64(newSize - oldSize)
+				delta += int64(newSize - oldSize)
+			} else {
+				delta += int64(newSize + len(aggpath) + len(owner))
+			}
+		}
+		dl.buffer.aggNodes[owner] = current
+	}
+
+	wg.Wait()
+	start1 := time.Now()
+	for owner, subset := range asyncAggNodes {
+		if _, ok := dl.buffer.aggNodes[owner]; !ok {
+			dl.buffer.aggNodes[owner] = subset
+		} else {
+			for aggpath, aggnode := range subset {
+				dl.buffer.aggNodes[owner][aggpath] = aggnode
+			}
+		}
+	}
+	commitMergeAsyncMapTimer.UpdateSince(start1)
+	delta += asyncDelta
+	dl.buffer.updateSize(delta)
+	dl.buffer.layers++
+	gcNodesMeter.Mark(overwrite)
+	gcBytesMeter.Mark(overwriteSize)
+}
+
+// setBufferSize sets the node buffer size to the provided value.
 func (dl *diskLayer) setBufferSize(size int) error {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
@@ -356,7 +431,7 @@ func (dl *diskLayer) setBufferSize(size int) error {
 	return dl.buffer.setSize(size, dl.db.diskdb, dl.cleans, dl.id)
 }
 
-// size returns the approximate size of cached nodes in the disk layer.
+// size returns the approximate size of cached aggNodes in the disk layer.
 func (dl *diskLayer) size() (common.StorageSize, common.StorageSize) {
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
@@ -364,8 +439,7 @@ func (dl *diskLayer) size() (common.StorageSize, common.StorageSize) {
 	if dl.stale {
 		return 0, 0
 	}
-	dirtyNodes, dirtyimmutableNodes := dl.buffer.getSize()
-	return common.StorageSize(dirtyNodes), common.StorageSize(dirtyimmutableNodes)
+	return common.StorageSize(dl.buffer.size), common.StorageSize(dl.immutableBuffer.size)
 }
 
 // resetCache releases the memory held by clean cache to prevent memory leak.
