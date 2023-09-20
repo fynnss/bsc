@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
@@ -26,7 +27,6 @@ type Hash2Path struct {
 	concurrentQueue chan struct{}
 	totalNum        uint64
 	wg              sync.WaitGroup
-	// batch           ethdb.Batch
 }
 
 const (
@@ -51,7 +51,6 @@ func NewHash2Path(tr *Trie, db *Database, stateRootHash common.Hash, blocknum ui
 		root:            tr.root,
 		concurrentQueue: make(chan struct{}, jobnum),
 		wg:              sync.WaitGroup{},
-		// batch:           db.diskdb.NewBatch(),
 	}
 
 	return ins, nil
@@ -71,27 +70,16 @@ func (t *Trie) resloveWithoutTrack(n node, prefix []byte) (node, error) {
 func (h2p *Hash2Path) writeNode(pathKey []byte, n *trienode.Node, owner common.Hash) {
 	if owner == (common.Hash{}) {
 		rawdb.WriteAccountTrieNode(h2p.db.DiskDB(), pathKey, n.Blob)
-		// fmt.Println("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("WriteNodes account node, ", "path: ", common.Bytes2Hex(pathKey), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	} else {
 		rawdb.WriteStorageTrieNode(h2p.db.DiskDB(), owner, pathKey, n.Blob)
-		// fmt.Println("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
+		log.Debug("WriteNodes storage node, ", "path: ", common.Bytes2Hex(pathKey), "owner: ", owner.String(), "Hash: ", n.Hash, "BlobHash: ", crypto.Keccak256Hash(n.Blob))
 	}
-	// if delete the nodes of the account trie here, the error will occur when open storage trie.
-	// rawdb.DeleteTrieNode(h2p.db.DiskDB(), owner, nil, n.Hash, rawdb.HashScheme)
-
-	// if h2p.batch.ValueSize() > 100000 {
-	// 	err := h2p.batch.Write()
-	// 	if err != nil {
-	// 		fmt.Println("batch write error: ", err)
-	// 	}
-	// 	// reset for next batch write
-	// 	h2p.batch.Reset()
-	// }
 }
 
 // Run statistics, external call
 func (h2p *Hash2Path) Run() {
-	log.Info("Find Account Trie Tree, rootHash: ", h2p.trie.Hash().String(), "BlockNum: ", h2p.blocknum)
+	log.Debug("Find Account Trie Tree, rootHash: ", h2p.trie.Hash().String(), "BlockNum: ", h2p.blocknum)
 
 	h2p.ConcurrentTraversal(h2p.trie, h2p.root, []byte{})
 	h2p.wg.Wait()
@@ -99,11 +87,6 @@ func (h2p *Hash2Path) Run() {
 	fmt.Println("hash2Path run finished.")
 	rawdb.WritePersistentStateID(h2p.db.DiskDB(), h2p.blocknum)
 	rawdb.WriteStateID(h2p.db.DiskDB(), h2p.stateRootHash, h2p.blocknum)
-	// err := h2p.batch.Write()
-	// if err != nil {
-	// 	fmt.Println("batch write error: ", err)
-	// }
-	// h2p.batch.Reset()
 }
 
 func (h2p *Hash2Path) SubConcurrentTraversal(theTrie *Trie, theNode node, path []byte) {
@@ -184,7 +167,7 @@ func (h2p *Hash2Path) ConcurrentTraversal(theTrie *Trie, theNode node, path []by
 			log.Error("New Storage trie error", "err", err, "root", account.Root.String(), "owner", ownerAddress.String())
 			break
 		}
-		// log.Info("Find Contract Trie Tree, rootHash: ", tr.Hash().String(), "")
+		log.Debug("Find Contract Trie Tree, rootHash: ", tr.Hash().String(), "")
 		h2p.wg.Add(1)
 		go h2p.SubConcurrentTraversal(tr, tr.root, []byte{})
 	default:
