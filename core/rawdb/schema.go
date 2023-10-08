@@ -281,16 +281,16 @@ func storageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
 	return append(append(trieNodeStoragePrefix, accountHash.Bytes()...), path...)
 }
 
-// aggAccountTrieNodeKey = aggTrieNodeAccountPrefix + nodePath.
-func aggAccountTrieNodeKey(path []byte) []byte {
+// accountTrieAggNodeKey = aggTrieNodeAccountPrefix + nodePath.
+func accountTrieAggNodeKey(path []byte) []byte {
 	if len(path)/2 != 0 {
 		panic("The path is not even length")
 	}
 	return append(aggTrieNodeAccountPrefix, path...)
 }
 
-// aggStorageTrieNodeKey = aggTrieNodeStoragePrefix + accountHash + nodePath
-func aggStorageTrieNodeKey(accountHash common.Hash, path []byte) []byte {
+// storageTrieAggNodeKey = aggTrieNodeStoragePrefix + accountHash + nodePath
+func storageTrieAggNodeKey(accountHash common.Hash, path []byte) []byte {
 	if len(path)/2 != 0 {
 		panic("The path is not even length")
 	}
