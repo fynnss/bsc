@@ -979,7 +979,7 @@ func (h *handler) voteBroadcastLoop() {
 // sync is finished.
 func (h *handler) enableSyncedFeatures() {
 	h.acceptTxs.Store(true)
-	if h.chain.TrieDB().Scheme() == rawdb.PathScheme {
+	if h.chain.TrieDB().Scheme() == rawdb.PathScheme || h.chain.TrieDB().Scheme() == rawdb.AggPathScheme {
 		h.chain.TrieDB().SetBufferSize(pathdb.DefaultBufferSize)
 	}
 }

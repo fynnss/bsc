@@ -284,7 +284,7 @@ func (db *cachingDB) CacheAccount(root common.Hash, t Trie) {
 	// only the hash scheme trie db support account cache, because the path scheme trie db
 	// account trie bind the previous layer, touch the dirty data when next access. This is
 	// related to the implementation of the Reader interface of pathdb.
-	if db.TrieDB().Scheme() == rawdb.PathScheme {
+	if db.TrieDB().Scheme() == rawdb.PathScheme || db.TrieDB().Scheme() == rawdb.AggPathScheme {
 		return
 	}
 	if db.accountTrieCache == nil {
@@ -296,7 +296,7 @@ func (db *cachingDB) CacheAccount(root common.Hash, t Trie) {
 
 func (db *cachingDB) CacheStorage(addrHash common.Hash, root common.Hash, t Trie) {
 	// ditto `CacheAccount`
-	if db.TrieDB().Scheme() == rawdb.PathScheme {
+	if db.TrieDB().Scheme() == rawdb.PathScheme || db.TrieDB().Scheme() == rawdb.AggPathScheme {
 		return
 	}
 	if db.storageTrieCache == nil {
