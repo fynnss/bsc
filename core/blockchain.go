@@ -407,7 +407,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		} else if bc.triedb.Scheme() == rawdb.PathScheme {
 			_, diskRoot = rawdb.ReadAccountTrieNode(bc.db, nil)
 		} else if bc.triedb.Scheme() == rawdb.AggPathScheme {
-			_, diskRoot = aggpathdb.ReadTrieNode(bc.db, common.Hash{}, nil)
+			_, diskRoot = aggpathdb.ReadTrieNodeFromAggNode(bc.db, common.Hash{}, nil)
 		}
 		if diskRoot != (common.Hash{}) {
 			log.Warn("Head state missing, repairing", "number", head.Number, "hash", head.Hash(), "snaproot", diskRoot)
