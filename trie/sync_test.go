@@ -573,7 +573,7 @@ func testIncompleteSync(t *testing.T, scheme string) {
 		if err := checkTrieConsistency(diskdb, srcDb.Scheme(), root); err == nil {
 			t.Fatalf("trie inconsistency not caught, missing: %x", path)
 		}
-		triedb.WriteTrieNode(diskdb, owner, inner, nodeHash, value, scheme)
+		triedb.WriteTrieNode(diskdb, diskdb, owner, inner, nodeHash, value, scheme)
 	}
 }
 
