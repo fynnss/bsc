@@ -111,7 +111,8 @@ func NewCustom(file string, namespace string, customize func(options *opt.Option
 	options := configureOptions(customize)
 	logger := log.New("database", file)
 	usedCache := options.GetBlockCacheCapacity() + options.GetWriteBuffer()*2
-	logCtx := []interface{}{"cache", common.StorageSize(usedCache), "handles", options.GetOpenFilesCacheCapacity()}
+	logCtx := []interface{}{"cache", common.StorageSize(usedCache),
+		"handles", options.GetOpenFilesCacheCapacity(), "write buffer:", common.StorageSize(options.GetWriteBuffer())}
 	if options.ReadOnly {
 		logCtx = append(logCtx, "readonly", "true")
 	}
