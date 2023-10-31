@@ -154,6 +154,9 @@ func (n *AggNode) encodeTo() []byte {
 	w.Flush()
 	return result
 }
+func (n *AggNode) EncodeToBytes() []byte {
+	return n.encodeTo()
+}
 
 func AggNodeString(blob []byte) string {
 	builder := strings.Builder{}
@@ -361,6 +364,11 @@ func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath
 	} else {
 		return rawdb.ReadStorageTrieAggNode(db, owner, aggPath)
 	}
+}
+
+func LoadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) (*AggNode, error) {
+	blob := loadAggNodeFromDatabase(db, owner, aggPath)
+	return DecodeAggNode(blob)
 }
 
 func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, path []byte) ([]byte, common.Hash) {
