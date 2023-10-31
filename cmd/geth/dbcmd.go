@@ -77,6 +77,7 @@ Remove blockchain and state databases`,
 			dbHbss2PbssCmd,
 			dbTrieGetCmd,
 			dbTrieDeleteCmd,
+			dbPbss2ApbssCmd,
 		},
 	}
 	dbInspectCmd = &cli.Command{
@@ -250,6 +251,13 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 		Usage: "Inspect the ancientStore information",
 		Description: `This commands will read current offset from kvdb, which is the current offset and starting BlockNumber
 of ancientStore, will also displays the reserved number of blocks in ancientStore `,
+	}
+	dbPbss2ApbssCmd = &cli.Command{
+		Action:      pbss2apbss,
+		Name:        "pbss-to-apbss",
+		Flags:       []cli.Flag{},
+		Usage:       "Convert Path-Base to Aggregated-Path-Base trie node.",
+		Description: `This command iterates the entire trie node database and convert the path-base node to aggregated-path-base node.`,
 	}
 )
 
@@ -1042,13 +1050,13 @@ func hbss2pbss(ctx *cli.Context) error {
 		id := trie.StateTrieID(trieRootHash)
 		theTrie, err := trie.New(id, triedb)
 		if err != nil {
-			log.Error("fail to new trie tree", "err", err, "rootHash", err, trieRootHash.String())
+			log.Error("fail to new trie tree", "err", err, "rootHash", trieRootHash.String())
 			return err
 		}
 
 		h2p, err := trie.NewHbss2Pbss(theTrie, triedb, trieRootHash, *blockNumber, jobnum)
 		if err != nil {
-			log.Error("fail to new hash2pbss", "err", err, "rootHash", err, trieRootHash.String())
+			log.Error("fail to new hash2pbss", "err", err, "rootHash", trieRootHash.String())
 			return err
 		}
 		h2p.Run()
@@ -1073,5 +1081,24 @@ func hbss2pbss(ctx *cli.Context) error {
 		log.Error("Prune Hash trie node in database failed", "error", err)
 		return err
 	}
+	return nil
+}
+
+func pbss2apbss(ctx *cli.Context) error {
+	if ctx.NArg() >= 2 {
+		return fmt.Errorf("max 1 arguments: %v", ctx.Command.ArgsUsage)
+	}
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	db := utils.MakeChainDatabase(ctx, stack, false, false)
+	defer db.Close()
+
+	p2a, err := trie.NewPbss2Apbss(db)
+	if err != nil {
+		return err
+	}
+	err = p2a.Run()
+	log.Info("Convert pbss to apbss", "error", err)
 	return nil
 }

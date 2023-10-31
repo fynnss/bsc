@@ -154,6 +154,10 @@ func (n *AggNode) encodeTo() []byte {
 	return result
 }
 
+func (n *AggNode) EncodeToBytes() []byte {
+	return n.encodeTo()
+}
+
 func writeRawNode(w rlp.EncoderBuffer, n []byte) {
 	if n == nil {
 		w.Write(rlp.EmptyString)
@@ -205,6 +209,10 @@ func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath
 	}
 
 	return DecodeAggNode(blob)
+}
+
+func LoadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) (*AggNode, error) {
+	return loadAggNodeFromDatabase(db, owner, aggPath)
 }
 
 func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, path []byte) ([]byte, common.Hash) {
