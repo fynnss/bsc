@@ -1094,11 +1094,8 @@ func pbss2apbss(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
-	p2a, err := trie.NewPbss2Apbss(db)
-	if err != nil {
-		return err
-	}
-	err = p2a.Run()
+	p2a := trie.NewPbss2Apbss(db)
+	err := p2a.Run()
 	log.Info("Convert pbss to apbss", "error", err)
-	return nil
+	return err
 }

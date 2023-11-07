@@ -188,6 +188,10 @@ func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, ag
 	}
 }
 
+func WriteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, aggNodeBytes []byte) {
+	writeAggNode(db, owner, aggPath, aggNodeBytes)
+}
+
 func deleteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte) {
 	if owner == (common.Hash{}) {
 		rawdb.DeleteAccountTrieNode(db, aggPath)
