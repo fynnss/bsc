@@ -119,7 +119,6 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		dirtyReadMeter.Mark(int64(len(n.Blob)))
 		return n.Blob, nil
 	}
-	dirtyMissMeter.Mark(1)
 
 	n, err = dl.immutableBuffer.node(owner, path, hash)
 	if err != nil {
@@ -127,8 +126,11 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	}
 
 	if n != nil {
+		dirtyHitMeter.Mark(1)
+		dirtyReadMeter.Mark(int64(len(n.Blob)))
 		return n.Blob, nil
 	}
+	dirtyMissMeter.Mark(1)
 
 	// Try to retrieve the trie node from the agg node cache.
 	blob, err := dl.cleans.node(owner, path, hash)
@@ -203,7 +205,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 			}
 		}
 
-		ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.immutableBuffer, dl.buffer)
+		ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.immutableBuffer, dl.buffer.commit(bottom.nodes))
 		if force {
 			err := ndl.immutableBuffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id)
 			if err != nil {
@@ -217,7 +219,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		}
 		return ndl, nil
 	} else {
-		ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer, dl.immutableBuffer)
+		ndl := newDiskLayer(bottom.root, bottom.stateID(), dl.db, dl.cleans, dl.buffer.commit(bottom.nodes), dl.immutableBuffer)
 		return ndl, nil
 	}
 }

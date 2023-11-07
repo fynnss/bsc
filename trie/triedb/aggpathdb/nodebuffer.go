@@ -184,7 +184,7 @@ func (b *nodebuffer) updateSize(delta int64) {
 	}
 	s := b.size
 	b.size = 0
-	log.Error("Invalid pathdb buffer size", "prev", common.StorageSize(s), "delta", common.StorageSize(delta))
+	log.Error("Invalid aggpathdb buffer size", "prev", common.StorageSize(s), "delta", common.StorageSize(delta))
 }
 
 // reset cleans up the disk cache.
@@ -275,7 +275,7 @@ func aggregateAndWriteAggNodes(cache *aggNodeCache, batch ethdb.Batch, nodes map
 				panic(fmt.Sprintf("Decode aggNode failed, error %v", err))
 			}
 			if aggNode == nil {
-				aggNode = &AggNode{}
+				aggNode = NewAggNode()
 			}
 			for path, n := range cs {
 				if n.IsDeleted() {
