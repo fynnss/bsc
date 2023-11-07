@@ -41,7 +41,7 @@ const (
 	defaultCleanSize = 16 * 1024 * 1024
 
 	// MaxDirtyBufferSize is the maximum memory allowance of node buffer.
-	// Too large aggNodeBuffer will cause the system to pause for a long
+	// Too large nodebuffer will cause the system to pause for a long
 	// time when write happens. Also, the largest batch that pebble can
 	// support is 4GB, node will panic if batch size exceeds this limit.
 	MaxDirtyBufferSize = 256 * 1024 * 1024
@@ -284,7 +284,7 @@ func (db *Database) Reset(root common.Hash) error {
 	}
 	// Re-construct a new disk layer backed by persistent state
 	// with **empty clean cache and node buffer**.
-	dl := newDiskLayer(root, 0, db, nil, newAggNodeBuffer(db.bufferSize, nil, 0), newAggNodeBuffer(db.bufferSize, nil, 0))
+	dl := newDiskLayer(root, 0, db, nil, newNodeBuffer(db.bufferSize, nil, 0), newNodeBuffer(db.bufferSize, nil, 0))
 	db.tree.reset(dl)
 	log.Info("Rebuilt trie database", "root", root)
 	return nil

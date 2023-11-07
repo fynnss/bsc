@@ -130,7 +130,7 @@ func (db *Database) loadLayers() layer {
 		log.Info("Failed to load aggpathdb journal, discard it", "err", err)
 	}
 	// Return single layer with persistent state.
-	return newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, newAggNodeBuffer(db.bufferSize, nil, 0), newAggNodeBuffer(db.bufferSize, nil, 0))
+	return newDiskLayer(root, rawdb.ReadPersistentStateID(db.diskdb), db, nil, newNodeBuffer(db.bufferSize, nil, 0), newNodeBuffer(db.bufferSize, nil, 0))
 }
 
 // loadDiskLayer reads the binary blob from the layer journal, reconstructing
@@ -171,8 +171,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	}
 	// Calculate the internal state transitions by id difference.
 	// commitNodes will
-	base := newDiskLayer(root, id, db, nil, newEmptyAggNodeBuffer(db.bufferSize, id-stored-1), newEmptyAggNodeBuffer(db.bufferSize, 0))
-	base.commitNodes(nodes)
+	base := newDiskLayer(root, id, db, nil, newNodeBuffer(db.bufferSize, nodes, id-stored-1), newNodeBuffer(db.bufferSize, nil, 0))
 	return base, nil
 }
 
@@ -261,26 +260,27 @@ func (dl *diskLayer) journal(w io.Writer) error {
 	if err := rlp.Encode(w, dl.id); err != nil {
 		return err
 	}
-	// Step three, write all unwritten aggNodes into the journal
-	nodes := make([]journalNodes, 0, len(dl.buffer.aggNodes))
-	for owner, subset := range dl.buffer.aggNodes {
+	// Step three, write all unwritten nodes into the journal
+	nodes := make([]journalNodes, 0, len(dl.immutableBuffer.nodes)+len(dl.buffer.nodes))
+	for owner, subset := range dl.immutableBuffer.nodes {
 		entry := journalNodes{Owner: owner}
-		for path, an := range subset {
-			if an.root != nil {
-				entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: an.root.Blob})
-			}
-			for i, n := range an.childes {
-				if n != nil {
-					entry.Nodes = append(entry.Nodes, journalNode{Path: append([]byte(path), byte(i)), Blob: n.Blob})
-				}
-			}
+		for path, node := range subset {
+			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
+		}
+		nodes = append(nodes, entry)
+	}
+
+	for owner, subset := range dl.buffer.nodes {
+		entry := journalNodes{Owner: owner}
+		for path, node := range subset {
+			entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: node.Blob})
 		}
 		nodes = append(nodes, entry)
 	}
 	if err := rlp.Encode(w, nodes); err != nil {
 		return err
 	}
-	log.Debug("Journaled pathdb disk layer", "root", dl.root, "aggNodes", len(dl.buffer.aggNodes))
+	log.Debug("Journaled pathdb disk layer", "root", dl.root, "nodes", len(nodes))
 	return nil
 }
 
