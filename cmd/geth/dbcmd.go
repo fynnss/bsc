@@ -255,6 +255,7 @@ of ancientStore, will also displays the reserved number of blocks in ancientStor
 	dbPbss2ApbssCmd = &cli.Command{
 		Action:      pbss2apbss,
 		Name:        "pbss-to-apbss",
+		ArgsUsage:   "<batchnum (optional)>",
 		Flags:       []cli.Flag{},
 		Usage:       "Convert Path-Base to Aggregated-Path-Base trie node.",
 		Description: `This command iterates the entire trie node database and convert the path-base node to aggregated-path-base node.`,
@@ -514,7 +515,7 @@ func dbTrieGet(ctx *cli.Context) error {
 				return err
 			}
 			nodeVal, hash := rawdb.ReadAccountTrieNode(db, pathKey)
-			log.Info("TrieGet result ", "PathKey", common.Bytes2Hex(pathKey), "Hash: ", hash, "node: ", trie.NodeString(hash.Bytes(), nodeVal))
+			log.Info("TrieGet result", "PathKey", common.Bytes2Hex(pathKey), "Hash", hash, "Node", trie.NodeString(hash.Bytes(), nodeVal))
 		} else if ctx.NArg() == 2 {
 			owner, err = hexutil.Decode(ctx.Args().Get(0))
 			if err != nil {
@@ -528,7 +529,7 @@ func dbTrieGet(ctx *cli.Context) error {
 			}
 
 			nodeVal, hash := rawdb.ReadStorageTrieNode(db, common.BytesToHash(owner), pathKey)
-			log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", hash, "node: ", trie.NodeString(hash.Bytes(), nodeVal))
+			log.Info("TrieGet result", "PathKey", common.Bytes2Hex(pathKey), "Owner", common.BytesToHash(owner), "Hash", hash, "Node", trie.NodeString(hash.Bytes(), nodeVal))
 		}
 	} else if scheme == rawdb.HashScheme {
 		if ctx.NArg() == 1 {
@@ -542,13 +543,14 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Error("db get failed, ", "error: ", err)
 				return err
 			}
-			log.Info("TrieGet result ", "HashKey: ", common.BytesToHash(hashKey), "node: ", trie.NodeString(hashKey, val))
+			log.Info("TrieGet result", "HashKey", common.BytesToHash(hashKey), "Node", trie.NodeString(hashKey, val))
 		} else {
 			log.Error("args too much")
 		}
 	} else if scheme == rawdb.AggPathScheme {
 		var (
 			pathKey      []byte
+			aggPathKey   []byte
 			owner        []byte
 			err          error
 			aggNodeBytes []byte
@@ -560,7 +562,7 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Error("Could not decode the value", "error", err)
 				return err
 			}
-			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggPathKey = aggpathdb.ToAggPath(pathKey)
 			aggNodeBytes = rawdb.ReadAccountTrieAggNode(db, aggPathKey)
 		} else if ctx.NArg() == 2 {
 			owner, err = hexutil.Decode(ctx.Args().Get(0))
@@ -573,12 +575,12 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Info("Could not decode the value", "error", err)
 				return err
 			}
-			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggPathKey = aggpathdb.ToAggPath(pathKey)
 			aggNodeBytes = rawdb.ReadStorageTrieAggNode(db, common.BytesToHash(owner), aggPathKey)
 		}
 		aggNode, err = aggpathdb.DecodeAggNode(aggNodeBytes)
 		node := aggNode.Node(pathKey)
-		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "HashKey: ", node.Hash, "node: ", trie.NodeString(node.Hash.Bytes(), node.Blob))
+		log.Info("TrieGet result", "PathKey", common.Bytes2Hex(pathKey), "AggPathKey", common.Bytes2Hex(aggPathKey), "Owner", common.BytesToHash(owner), "HashKey", node.Hash, "Node", trie.NodeString(node.Hash.Bytes(), node.Blob))
 	}
 
 	return nil
@@ -1085,8 +1087,18 @@ func hbss2pbss(ctx *cli.Context) error {
 }
 
 func pbss2apbss(ctx *cli.Context) error {
+	var (
+		err      error
+		batchNum = uint64(16) // default 16
+	)
 	if ctx.NArg() >= 2 {
 		return fmt.Errorf("max 1 arguments: %v", ctx.Command.ArgsUsage)
+	}
+	if ctx.NArg() == 1 {
+		batchNum, err = strconv.ParseUint(ctx.Args().Get(0), 10, 64)
+		if err != nil {
+			return fmt.Errorf("failed to parse batch number, Args[1]: %v, err: %v", ctx.Args().Get(1), err)
+		}
 	}
 	stack, _ := makeConfigNode(ctx)
 	defer stack.Close()
@@ -1094,8 +1106,8 @@ func pbss2apbss(ctx *cli.Context) error {
 	db := utils.MakeChainDatabase(ctx, stack, false, false)
 	defer db.Close()
 
-	p2a := trie.NewPbss2Apbss(db)
-	err := p2a.Run()
+	p2a := trie.NewPbss2Apbss(db, batchNum)
+	err = p2a.Run()
 	log.Info("Convert pbss to apbss", "error", err)
 	return err
 }

@@ -67,6 +67,18 @@ func (n *AggNode) Update(path []byte, node *trienode.Node) {
 	}
 }
 
+// Merge is used to merge the dirty diff.
+func (n *AggNode) Merge(dirtyDiff *AggNode) {
+	if dirtyDiff.root != nil {
+		n.root = dirtyDiff.root
+	}
+	for i, c := range dirtyDiff.childes {
+		if c != nil {
+			n.childes[i] = c
+		}
+	}
+}
+
 func (n *AggNode) Delete(path []byte) {
 	if len(path)%2 == 0 {
 		n.root = nil

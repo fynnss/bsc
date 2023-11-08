@@ -15,77 +15,107 @@ import (
 const (
 	printLogPerIterateNumber = 10000000
 	printLogPerElapsedSpan   = 10 * time.Second
-	convertBatchThreshold    = 16
 )
 
 type convertBatcher struct {
-	reader             ethdb.KeyValueReader
-	batchWriter        ethdb.Batch
-	aggNodes           map[common.Hash]map[string]*aggpathdb.AggNode // need to update
-	trieNodes          map[common.Hash]map[string]struct{}           // need to delete
-	batchConvertNumber uint64
+	reader                ethdb.KeyValueReader
+	batchWriter           ethdb.Batch
+	trieNodes             map[common.Hash]map[string]map[string]*trienode.Node // dirty trie node is use to update/delete.
+	convertBatchThreshold uint64
+	currentConvertNumber  uint64
 }
 
-func newConvertBatcher(db ethdb.Database) *convertBatcher {
+func newConvertBatcher(db ethdb.Database, batchThreshold uint64) *convertBatcher {
 	return &convertBatcher{
-		reader:             db,
-		batchWriter:        db.NewBatch(),
-		aggNodes:           make(map[common.Hash]map[string]*aggpathdb.AggNode),
-		trieNodes:          make(map[common.Hash]map[string]struct{}),
-		batchConvertNumber: 0,
+		reader:                db,
+		batchWriter:           db.NewBatch(),
+		trieNodes:             make(map[common.Hash]map[string]map[string]*trienode.Node),
+		convertBatchThreshold: batchThreshold,
+		currentConvertNumber:  0,
 	}
 }
 
-func (c *convertBatcher) convert(owner common.Hash, path []byte, value []byte) error {
+func (c *convertBatcher) convert(owner common.Hash, pathKey []byte, node *trienode.Node) error {
 	var (
 		ok         = true
-		aggPathKey = aggpathdb.ToAggPath(path)
+		aggPathKey = aggpathdb.ToAggPath(pathKey)
 	)
 
-	_, ok = c.aggNodes[owner]
-	if !ok {
-		c.aggNodes[owner] = make(map[string]*aggpathdb.AggNode)
-	}
-	_, ok = c.aggNodes[owner][string(aggPathKey)]
-	if !ok {
-		aggNode, err := aggpathdb.LoadAggNodeFromDatabase(c.reader, owner, aggPathKey)
-		if err != nil {
-			log.Error("Failed to load agg node from db",
-				"owner", owner.String(),
-				"path_key", common.Bytes2Hex(path),
-				"agg_path_key", common.Bytes2Hex(aggPathKey))
-			return err
-		}
-		if aggNode == nil {
-			aggNode = &aggpathdb.AggNode{}
-		}
-		c.aggNodes[owner][string(aggPathKey)] = aggNode
-	}
-	c.aggNodes[owner][string(aggPathKey)].Update(path, trienode.New(common.Hash{}, value))
 	_, ok = c.trieNodes[owner]
 	if !ok {
-		c.trieNodes[owner] = make(map[string]struct{})
+		c.trieNodes[owner] = make(map[string]map[string]*trienode.Node)
 	}
-	c.trieNodes[owner][string(path)] = struct{}{}
+	_, ok = c.trieNodes[owner][string(aggPathKey)]
+	if !ok {
+		c.trieNodes[owner][string(aggPathKey)] = make(map[string]*trienode.Node)
+	}
+	_, ok = c.trieNodes[owner][string(aggPathKey)][string(pathKey)]
+	if !ok {
+		c.trieNodes[owner][string(aggPathKey)][string(pathKey)] = node
+	} else {
+		log.Crit("Failed to convert due to repeated path key",
+			"owner", owner.String(),
+			"agg_path_key", common.Bytes2Hex(aggPathKey),
+			"path_key", common.Bytes2Hex(pathKey),
+			"old_node", NodeString(c.trieNodes[owner][string(aggPathKey)][string(pathKey)].Hash.Bytes(),
+				c.trieNodes[owner][string(aggPathKey)][string(pathKey)].Blob),
+			"new_node", NodeString(node.Hash.Bytes(), node.Blob))
+	}
 
+	c.currentConvertNumber++
 	log.Debug("Convert trie node to agg node",
 		"owner", owner.String(),
-		"path_key", common.Bytes2Hex(path),
-		"agg_path_key", common.Bytes2Hex(aggPathKey))
-	c.batchConvertNumber++
+		"path_key", common.Bytes2Hex(pathKey),
+		"agg_path_key", common.Bytes2Hex(aggPathKey),
+		"node", NodeString(node.Hash.Bytes(), node.Blob),
+		"current_convert_number", c.currentConvertNumber)
 	return c.writeToDB(false)
 }
 
 func (c *convertBatcher) writeToDB(force bool) error {
-	if c.batchConvertNumber >= convertBatchThreshold || force {
-		for owner, subset := range c.aggNodes {
-			for aggPath, aggNode := range subset {
-				aggpathdb.WriteAggNode(c.batchWriter, owner, []byte(aggPath), aggNode.EncodeToBytes())
+	if c.currentConvertNumber >= c.convertBatchThreshold || force {
+		var (
+			aggNodes = make(map[common.Hash]map[string]*aggpathdb.AggNode) // dirty diff, batch update
+			ok       = true
+		)
+
+		for owner, ownerSubset := range c.trieNodes {
+			_, ok = aggNodes[owner]
+			if !ok {
+				aggNodes[owner] = make(map[string]*aggpathdb.AggNode)
+			}
+			for aggPathKey, aggSubset := range ownerSubset {
+				_, ok = aggNodes[owner][aggPathKey]
+				if !ok {
+					aggNodes[owner][aggPathKey] = &aggpathdb.AggNode{}
+				}
+				for pathKey, tireNode := range aggSubset {
+					aggNodes[owner][aggPathKey].Update([]byte(pathKey), tireNode)
+					triedb.DeleteTrieNode(c.batchWriter, nil, owner, []byte(pathKey), common.Hash{}, rawdb.PathScheme)
+					log.Debug("Delete trie node",
+						"owner", owner.String(),
+						"path_key", common.Bytes2Hex([]byte(pathKey)))
+
+				}
 			}
 		}
-		for owner, subset := range c.trieNodes {
-			for trieNodePath, _ := range subset {
-				triedb.DeleteTrieNode(c.batchWriter, nil, owner, []byte(trieNodePath), common.Hash{}, rawdb.PathScheme)
+		for owner, subset := range aggNodes {
+			for aggPathKey, dirtyDiff := range subset {
+				aggNode, err := aggpathdb.LoadAggNodeFromDatabase(c.reader, owner, []byte(aggPathKey))
+				if err != nil {
+					log.Error("Failed to load agg node from db",
+						"owner", owner.String(),
+						"agg_path_key", common.Bytes2Hex([]byte(aggPathKey)))
+					return err
+				}
+				if aggNode == nil {
+					aggNode = &aggpathdb.AggNode{}
+				}
+				aggNode.Merge(dirtyDiff)
+				aggpathdb.WriteAggNode(c.batchWriter, owner, []byte(aggPathKey), aggNode.EncodeToBytes())
+				log.Debug("Overwrite agg node",
+					"owner", owner.String(),
+					"agg_path_key", common.Bytes2Hex([]byte(aggPathKey)))
 			}
 		}
 		if err := c.batchWriter.Write(); err != nil {
@@ -95,14 +125,14 @@ func (c *convertBatcher) writeToDB(force bool) error {
 
 		c.reset()
 	}
+
 	return nil
 }
 
 func (c *convertBatcher) reset() {
 	c.batchWriter.Reset()
-	c.aggNodes = make(map[common.Hash]map[string]*aggpathdb.AggNode)
-	c.trieNodes = make(map[common.Hash]map[string]struct{})
-	c.batchConvertNumber = 0
+	c.trieNodes = make(map[common.Hash]map[string]map[string]*trienode.Node)
+	c.currentConvertNumber = 0
 	return
 }
 
@@ -113,10 +143,10 @@ type Pbss2Apbss struct {
 }
 
 // NewPbss2Apbss return a Pbss2Apbss obj.
-func NewPbss2Apbss(db ethdb.Database) *Pbss2Apbss {
+func NewPbss2Apbss(db ethdb.Database, batchNum uint64) *Pbss2Apbss {
 	return &Pbss2Apbss{
 		iterator: db.NewIterator(nil, nil),
-		batcher:  newConvertBatcher(db),
+		batcher:  newConvertBatcher(db, batchNum),
 	}
 }
 
@@ -151,7 +181,7 @@ func (p2a *Pbss2Apbss) Run() error {
 			if !ok {
 				log.Crit("Failed to resolve account trie node key", "key", common.Bytes2Hex(key))
 			}
-			if err = p2a.batcher.convert(common.Hash{}, pathKey, value); err != nil {
+			if err = p2a.batcher.convert(common.Hash{}, pathKey, trienode.New(common.Hash{}, common.CopyBytes(value))); err != nil {
 				log.Error("Failed to convert account trie node to agg node", "path_key", common.Bytes2Hex(pathKey))
 				return err
 			}
@@ -161,7 +191,7 @@ func (p2a *Pbss2Apbss) Run() error {
 			if !ok {
 				log.Crit("Failed to resolve storage trie node key", "key", common.Bytes2Hex(key))
 			}
-			if err = p2a.batcher.convert(owner, pathKey, value); err != nil {
+			if err = p2a.batcher.convert(owner, pathKey, trienode.New(common.Hash{}, common.CopyBytes(value))); err != nil {
 				log.Error("Failed to convert storage trie node to agg node",
 					"owner", owner.String(),
 					"path_key", common.Bytes2Hex(pathKey))
