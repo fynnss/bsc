@@ -171,7 +171,7 @@ func (db *Database) loadDiskLayer(r *rlp.Stream) (layer, error) {
 	}
 	// Calculate the internal state transitions by id difference.
 	// commitNodes will
-	base := newDiskLayer(root, id, db, nil, newNodeBuffer(db.bufferSize, nodes, id-stored-1))
+	base := newDiskLayer(root, id, db, nil, newNodeBuffer(db.bufferSize, nodes, id-stored))
 	return base, nil
 }
 
