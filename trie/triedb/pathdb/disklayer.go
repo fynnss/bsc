@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -153,6 +154,8 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
+	var start = time.Now()
+
 	if dl.stale {
 		return nil, errSnapshotStale
 	}
@@ -208,6 +211,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		dl.cleans.Set(key, nBlob)
 		cleanWriteMeter.Mark(int64(len(nBlob)))
 	}
+	diskLayerNodeTimer.UpdateSince(start)
 	return nBlob, nil
 }
 
@@ -230,6 +234,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	var (
 		overflow bool
 		oldest   uint64
+		start    = time.Now()
 	)
 	if dl.db.freezer != nil {
 		err := writeHistory(dl.db.freezer, bottom)
@@ -283,6 +288,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		}
 		log.Debug("Pruned state history", "items", pruned, "tailid", oldest)
 	}
+	diskLayerCommitTimer.UpdateSince(start)
 	return ndl, nil
 }
 

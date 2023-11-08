@@ -38,6 +38,9 @@ var (
 	commitNodesMeter = metrics.NewRegisteredMeter("pathdb/commit/nodes", nil)
 	commitBytesMeter = metrics.NewRegisteredMeter("pathdb/commit/bytes", nil)
 
+	diskLayerCommitTimer = metrics.NewRegisteredTimer("pathdb/disk/commit/time", nil)
+	diskLayerNodeTimer   = metrics.NewRegisteredTimer("pathdb/disk/node/time", nil)
+
 	gcNodesMeter     = metrics.NewRegisteredMeter("pathdb/gc/nodes", nil)
 	gcBytesMeter     = metrics.NewRegisteredMeter("pathdb/gc/bytes", nil)
 	gcTotalNodeMeter = metrics.NewRegisteredMeter("pathdb/gc/totalnodes", nil)
