@@ -3,6 +3,7 @@ package aggpathdb
 import (
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -10,6 +11,12 @@ import (
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
+
+var tireNodePool = sync.Pool{
+	New: func() interface{} {
+		return new(trienode.Node)
+	},
+}
 
 // AggNode is a basic structure for aggregate and store two layer trie node.
 type AggNode struct {
@@ -166,6 +173,7 @@ func decodeKey(buf []byte) ([]byte, []byte, error) {
 }
 
 func decodeRawNode(buf []byte) (*trienode.Node, []byte, error) {
+
 	kind, val, rest, err := rlp.Split(buf)
 	if err != nil {
 		return nil, buf, err
@@ -175,8 +183,10 @@ func decodeRawNode(buf []byte) (*trienode.Node, []byte, error) {
 		return nil, rest, nil
 	}
 
+	node := tireNodePool.Get().(*trienode.Node)
+	node.Blob = val
 	// Hashes are not calculated here to avoid unnecessary overhead
-	return &trienode.Node{Blob: val}, rest, nil
+	return node, rest, nil
 }
 
 func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, aggNodeBytes []byte) {
