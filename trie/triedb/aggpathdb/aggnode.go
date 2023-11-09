@@ -67,6 +67,18 @@ func (n *AggNode) Update(path []byte, node *trienode.Node) {
 	}
 }
 
+// Merge is used to merge the dirty diff.
+func (n *AggNode) Merge(dirtyDiff *AggNode) {
+	if dirtyDiff.root != nil {
+		n.root = dirtyDiff.root
+	}
+	for i, c := range dirtyDiff.childes {
+		if c != nil {
+			n.childes[i] = c
+		}
+	}
+}
+
 func (n *AggNode) Delete(path []byte) {
 	if len(path)%2 == 0 {
 		n.root = nil
@@ -154,6 +166,10 @@ func (n *AggNode) encodeTo() []byte {
 	return result
 }
 
+func (n *AggNode) EncodeToBytes() []byte {
+	return n.encodeTo()
+}
+
 func writeRawNode(w rlp.EncoderBuffer, n []byte) {
 	if n == nil {
 		w.Write(rlp.EmptyString)
@@ -184,6 +200,10 @@ func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, ag
 	}
 }
 
+func WriteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, aggNodeBytes []byte) {
+	writeAggNode(db, owner, aggPath, aggNodeBytes)
+}
+
 func deleteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte) {
 	if owner == (common.Hash{}) {
 		rawdb.DeleteAccountTrieNode(db, aggPath)
@@ -205,6 +225,10 @@ func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath
 	}
 
 	return DecodeAggNode(blob)
+}
+
+func LoadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) (*AggNode, error) {
+	return loadAggNodeFromDatabase(db, owner, aggPath)
 }
 
 func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, path []byte) ([]byte, common.Hash) {
