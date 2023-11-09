@@ -58,7 +58,7 @@ const (
 
 	// DefaultBatchRedundancyRate defines the batch size, compatible write
 	// size calculation is inaccurate
-	DefaultBatchRedundancyRate = 1.1
+	DefaultBatchRedundancyRate = 2.5
 )
 
 // layer is the interface implemented by all state layers which includes some

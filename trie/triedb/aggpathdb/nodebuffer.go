@@ -23,6 +23,14 @@ type nodebuffer struct {
 	background *nodecache
 }
 
+var aggNodePool = sync.Pool{
+	New: func() interface{} {
+		return &AggNode{
+			nodes: make(map[string][]byte),
+		}
+	},
+}
+
 // newNodeBuffer initializes the async node buffer with the provided nodes.
 func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodebuffer {
 	if nodes == nil {
@@ -491,6 +499,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), aggNodeBytes)
 				}
 			}
+			aggNodePool.Put(aggNode)
 			total++
 		}
 	}

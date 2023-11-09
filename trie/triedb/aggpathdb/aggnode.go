@@ -17,9 +17,7 @@ type AggNode struct {
 }
 
 func NewAggNode() *AggNode {
-	return &AggNode{
-		nodes: make(map[string][]byte),
-	}
+	return aggNodePool.Get().(*AggNode)
 }
 
 func DecodeAggNode(data []byte) (*AggNode, error) {

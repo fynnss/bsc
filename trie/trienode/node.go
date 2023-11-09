@@ -20,16 +20,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 )
-
-var trieNodePool = sync.Pool{
-	New: func() interface{} {
-		return new(Node)
-	},
-}
 
 // Node is a wrapper which contains the encoded blob of the trie node and its
 // node hash. It is general enough that can be used to represent trie node
@@ -51,10 +44,7 @@ func (n *Node) IsDeleted() bool {
 
 // New constructs a node with provided node information.
 func New(hash common.Hash, blob []byte) *Node {
-	node := trieNodePool.Get().(*Node)
-	node.Hash = hash
-	node.Blob = blob
-	return node
+	return &Node{Hash: hash, Blob: blob}
 }
 
 // NewDeleted constructs a node which is deleted.
