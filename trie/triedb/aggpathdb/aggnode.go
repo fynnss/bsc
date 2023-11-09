@@ -1,31 +1,24 @@
 package aggpathdb
 
 import (
+	"bytes"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie/trienode"
 )
-
-var tireNodePool = sync.Pool{
-	New: func() interface{} {
-		return new(trienode.Node)
-	},
-}
 
 // AggNode is a basic structure for aggregate and store two layer trie node.
 type AggNode struct {
-	nodes map[string]*trienode.Node
+	nodes map[string][]byte
 }
 
 func NewAggNode() *AggNode {
 	return &AggNode{
-		nodes: make(map[string]*trienode.Node),
+		nodes: make(map[string][]byte),
 	}
 }
 
@@ -67,13 +60,13 @@ func (n *AggNode) Empty() bool {
 func (n *AggNode) Size() int {
 	size := 0
 	for k, node := range n.nodes {
-		size += len(k) + len(node.Blob)
+		size += len(k) + len(node)
 	}
 	return size
 }
 
-func (n *AggNode) Update(path []byte, node *trienode.Node) {
-	n.nodes[index(path)] = node
+func (n *AggNode) Update(path []byte, blob []byte) {
+	n.nodes[index(path)] = blob
 }
 
 func (n *AggNode) Delete(path []byte) {
@@ -89,17 +82,17 @@ func (n *AggNode) Has(path []byte) bool {
 	return ok
 }
 
-func (n *AggNode) Node(path []byte) *trienode.Node {
-	tn, ok := n.nodes[index(path)]
+func (n *AggNode) Node(path []byte) ([]byte, common.Hash) {
+	blob, ok := n.nodes[index(path)]
 	if !ok {
-		return nil
+		return nil, common.Hash{}
 	}
-	if tn.Hash == (common.Hash{}) && len(tn.Blob) != 0 {
+	if len(blob) != 0 {
 		h := newHasher()
 		defer h.release()
-		tn.Hash = h.hash(tn.Blob)
+		return blob, h.hash(blob)
 	}
-	return tn
+	return nil, common.Hash{}
 }
 
 func (n *AggNode) decodeFrom(buf []byte) error {
@@ -118,17 +111,17 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 	for {
 		var (
 			key  []byte
-			node *trienode.Node
+			blob []byte
 		)
 		key, rest, err = decodeKey(rest)
 		if err != nil {
 			return fmt.Errorf("decode node key failed in AggNode: %v", err)
 		}
-		node, rest, err = decodeRawNode(rest)
+		blob, rest, err = decodeRawNode(rest)
 		if err != nil {
 			return fmt.Errorf("decode node key failed in AggNode: %v", err)
 		}
-		n.nodes[string(key)] = node
+		n.nodes[string(key)] = blob
 		if len(rest) == 0 {
 			break
 		}
@@ -140,14 +133,63 @@ func (n *AggNode) encodeTo() []byte {
 	w := rlp.NewEncoderBuffer(nil)
 	offset := w.List()
 
-	for k, tn := range n.nodes {
+	for k, blob := range n.nodes {
 		w.WriteBytes([]byte(k))
-		writeRawNode(w, tn.Blob)
+		writeRawNode(w, blob)
 	}
 	w.ListEnd(offset)
 	result := w.ToBytes()
 	w.Flush()
 	return result
+}
+
+func readFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
+	if len(blob) == 0 {
+		return nil, common.Hash{}, io.ErrUnexpectedEOF
+	}
+
+	rest, _, err := rlp.SplitList(blob)
+	if err != nil {
+		return nil, common.Hash{}, fmt.Errorf("decode error: %v", err)
+	}
+	if len(rest) == 0 {
+		return nil, common.Hash{}, nil
+	}
+
+	sKey := []byte(index(path))
+	for {
+		var (
+			key   []byte
+			nBlob []byte
+		)
+		key, rest, err = decodeKey(rest)
+		if err != nil {
+			return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
+		}
+		if bytes.Compare(key, sKey) == 0 {
+			nBlob, rest, err = decodeRawNode(rest)
+			if err != nil {
+				return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
+			}
+			if len(nBlob) != 0 {
+				h := newHasher()
+				nHash := h.hash(nBlob)
+				h.release()
+				return nBlob, nHash, nil
+			} else {
+				return nil, common.Hash{}, nil
+			}
+		} else {
+			_, _, rest, err = rlp.Split(rest)
+			if err != nil {
+				return nil, common.Hash{}, err
+			}
+			if len(rest) == 0 {
+				break
+			}
+		}
+	}
+	return nil, common.Hash{}, nil
 }
 
 func writeRawNode(w rlp.EncoderBuffer, n []byte) {
@@ -172,8 +214,7 @@ func decodeKey(buf []byte) ([]byte, []byte, error) {
 	return val, rest, nil
 }
 
-func decodeRawNode(buf []byte) (*trienode.Node, []byte, error) {
-
+func decodeRawNode(buf []byte) ([]byte, []byte, error) {
 	kind, val, rest, err := rlp.Split(buf)
 	if err != nil {
 		return nil, buf, err
@@ -183,10 +224,8 @@ func decodeRawNode(buf []byte) (*trienode.Node, []byte, error) {
 		return nil, rest, nil
 	}
 
-	node := tireNodePool.Get().(*trienode.Node)
-	node.Blob = val
 	// Hashes are not calculated here to avoid unnecessary overhead
-	return node, rest, nil
+	return val, rest, nil
 }
 
 func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, aggNodeBytes []byte) {
@@ -230,9 +269,7 @@ func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, pat
 		return nil, common.Hash{}
 	}
 
-	node := aggNode.Node(path)
-
-	return node.Blob, node.Hash
+	return aggNode.Node(path)
 }
 
 func DeleteTrieNodeFromAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValueReader, owner common.Hash, path []byte) {
@@ -262,7 +299,7 @@ func WriteTrieNodeWithAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValue
 	if aggNode == nil {
 		return
 	}
-	aggNode.Update(path, &trienode.Node{Blob: node})
+	aggNode.Update(path, node)
 
 	writeAggNode(writer, owner, aggPath, aggNode.encodeTo())
 }

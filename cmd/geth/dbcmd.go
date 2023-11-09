@@ -569,8 +569,8 @@ func dbTrieGet(ctx *cli.Context) error {
 			aggNodeBytes = rawdb.ReadStorageTrieAggNode(db, common.BytesToHash(owner), aggPathKey)
 		}
 		aggNode, err = aggpathdb.DecodeAggNode(aggNodeBytes)
-		node := aggNode.Node(pathKey)
-		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "HashKey: ", node.Hash, "node: ", trie.NodeString(node.Hash.Bytes(), node.Blob))
+		node, hash := aggNode.Node(pathKey)
+		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "HashKey: ", hash, "node: ", trie.NodeString(hash.Bytes(), node))
 	}
 
 	return nil

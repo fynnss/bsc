@@ -476,7 +476,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 				if n.IsDeleted() {
 					aggNode.Delete([]byte(path))
 				} else {
-					aggNode.Update([]byte(path), n)
+					aggNode.Update([]byte(path), n.Blob)
 				}
 			}
 			if aggNode.Empty() {

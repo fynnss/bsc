@@ -32,24 +32,22 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 
 	if c.cleans != nil {
 		if blob := c.cleans.Get(nil, key); len(blob) > 0 {
-			aggNode, err := DecodeAggNode(blob)
+			n, nHash, err := readFromBlob(path, blob)
 			if err != nil {
-				return nil, fmt.Errorf("decode node failed. error: %v", err)
+				return nil, fmt.Errorf("read from aggnode blob failed. error: %v", err)
 			}
-
-			n := aggNode.Node(path)
 			if n == nil {
 				// not found
 				return []byte{}, nil
 			}
 
-			if n.Hash == hash {
+			if nHash == hash {
 				cleanHitMeter.Mark(1)
 				cleanReadMeter.Mark(int64(len(blob)))
-				return n.Blob, nil
+				return n, nil
 			}
 			cleanFalseMeter.Mark(1)
-			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", n.Hash)
+			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", nHash)
 		}
 		cleanMissMeter.Mark(1)
 	}
@@ -66,17 +64,16 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	} else {
 		nBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
 	}
-	aggNode, err := DecodeAggNode(nBlob)
+	n, nHash, err := readFromBlob(path, nBlob)
 	if err != nil {
-		return nil, fmt.Errorf("decode node failed. error: %v", err)
+		return nil, fmt.Errorf("read from aggnode blob failed. error: %v", err)
 	}
-	n := aggNode.Node(path)
 	if n == nil {
 		// not found
 		return []byte{}, nil
 	}
 
-	if n.Hash != hash {
+	if nHash != hash {
 		diskFalseMeter.Mark(1)
 		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
 		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
@@ -86,7 +83,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 		cleanWriteMeter.Mark(int64(len(nBlob)))
 	}
 
-	return n.Blob, nil
+	return n, nil
 }
 
 func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, error) {
