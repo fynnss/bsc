@@ -102,6 +102,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	defer dl.lock.RUnlock()
 
 	var start = time.Now()
+	defer diskLayerNodeTimer.UpdateSince(start)
 
 	if dl.stale {
 		return nil, errSnapshotStale
@@ -126,7 +127,6 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	if err != nil {
 		return nil, err
 	}
-	diskLayerNodeTimer.UpdateSince(start)
 
 	return blob, nil
 }

@@ -155,6 +155,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	defer dl.lock.RUnlock()
 
 	var start = time.Now()
+	defer diskLayerNodeTimer.UpdateSince(start)
 
 	if dl.stale {
 		return nil, errSnapshotStale
@@ -194,9 +195,11 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	}
 	// Try to retrieve the trie node from the disk.
 	var (
-		nBlob []byte
-		nHash common.Hash
+		nBlob  []byte
+		nHash  common.Hash
+		nStart = time.Now()
 	)
+	defer diskLayerRawNodeTimer.UpdateSince(nStart)
 	if owner == (common.Hash{}) {
 		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
 	} else {
@@ -211,7 +214,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		dl.cleans.Set(key, nBlob)
 		cleanWriteMeter.Mark(int64(len(nBlob)))
 	}
-	diskLayerNodeTimer.UpdateSince(start)
+
 	return nBlob, nil
 }
 
