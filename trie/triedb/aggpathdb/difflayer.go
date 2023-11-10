@@ -126,6 +126,7 @@ func (dl *diffLayer) node(owner common.Hash, path []byte, hash common.Hash, dept
 	if diff, ok := dl.parent.(*diffLayer); ok {
 		return diff.node(owner, path, hash, depth+1)
 	}
+
 	// Failed to resolve through diff layers, fallback to disk layer
 	return dl.parent.Node(owner, path, hash)
 }

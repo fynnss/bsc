@@ -460,7 +460,7 @@ func (s *Sync) children(req *nodeRequest, object node) ([]*nodeRequest, error) {
 		//
 		// This step is only necessary for path mode, as there is no deletion
 		// in hash mode at all.
-		if _, ok := node.Val.(hashNode); ok && s.scheme == rawdb.PathScheme {
+		if _, ok := node.Val.(hashNode); ok && (s.scheme == rawdb.PathScheme || s.scheme == rawdb.AggPathScheme) {
 			owner, inner := ResolvePath(req.path)
 			for i := 1; i < len(key); i++ {
 				// While checking for a non-existent item in Pebble can be less efficient
@@ -566,7 +566,7 @@ func (s *Sync) commitNodeRequest(req *nodeRequest) error {
 	s.membatch.hashes[string(req.path)] = req.hash
 
 	// The size tracking refers to the db-batch, not the in-memory data.
-	if s.scheme == rawdb.PathScheme {
+	if s.scheme == rawdb.PathScheme || s.scheme == rawdb.AggPathScheme {
 		s.membatch.size += uint64(len(req.path) + len(req.data))
 	} else {
 		s.membatch.size += common.HashLength + uint64(len(req.data))

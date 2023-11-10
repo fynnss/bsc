@@ -101,9 +101,11 @@ func MakeProtocols(backend Backend, network uint64, dnsdisc enode.Iterator) []p2
 		version := version // Closure
 
 		// Path scheme does not support GetNodeData, don't advertise eth66 on it
-		if version <= ETH66 && backend.Chain().TrieDB().Scheme() == rawdb.PathScheme {
+		if version <= ETH66 && (backend.Chain().TrieDB().Scheme() == rawdb.PathScheme ||
+			backend.Chain().TrieDB().Scheme() == rawdb.AggPathScheme) {
 			continue
 		}
+
 		protocols = append(protocols, p2p.Protocol{
 			Name:    ProtocolName,
 			Version: version,
