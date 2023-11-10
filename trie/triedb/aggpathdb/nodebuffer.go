@@ -23,14 +23,6 @@ type nodebuffer struct {
 	background *nodecache
 }
 
-var aggNodePool = sync.Pool{
-	New: func() interface{} {
-		return &AggNode{
-			nodes: make(map[string][]byte),
-		}
-	},
-}
-
 // newNodeBuffer initializes the async node buffer with the provided nodes.
 func newNodeBuffer(limit int, nodes map[common.Hash]map[string]*trienode.Node, layers uint64) *nodebuffer {
 	if nodes == nil {
@@ -477,29 +469,22 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 			if err != nil {
 				panic(fmt.Sprintf("Decode aggNode failed, error %v", err))
 			}
-			if aggNode == nil {
-				aggNode = NewAggNode()
+			blob, err := UpdateToBlob(aggNode, cs)
+			if err != nil {
+				panic(fmt.Sprintf("Update to blob failed, error %v", err))
 			}
-			for path, n := range cs {
-				if n.IsDeleted() {
-					aggNode.Delete([]byte(path))
-				} else {
-					aggNode.Update([]byte(path), n.Blob)
-				}
-			}
-			if aggNode.Empty() {
+
+			if blob == nil {
 				deleteAggNode(batch, owner, []byte(aggPath))
 				if cache.cleans != nil {
 					cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
 				}
 			} else {
-				aggNodeBytes := aggNode.encodeTo()
-				writeAggNode(batch, owner, []byte(aggPath), aggNodeBytes)
+				writeAggNode(batch, owner, []byte(aggPath), blob)
 				if cache.cleans != nil {
-					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), aggNodeBytes)
+					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), blob)
 				}
 			}
-			aggNodePool.Put(aggNode)
 			total++
 		}
 	}

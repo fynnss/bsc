@@ -19,7 +19,7 @@ func newAggNodeCache(db *Database, cleans *fastcache.Cache, cacheSize int) *aggN
 		cleans = fastcache.New(cacheSize)
 	}
 
-	log.Info("Allocated node cache", "size", cacheSize)
+	log.Info("Allocated agg node cache", "size", cacheSize)
 	return &aggNodeCache{
 		cleans: cleans,
 		db:     db,
@@ -86,7 +86,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	return n, nil
 }
 
-func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, error) {
+func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) ([]byte, error) {
 	var blob []byte
 	cKey := cacheKey(owner, aggPath)
 	if c.cleans != nil {
@@ -95,7 +95,7 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, err
 		if cacheHit {
 			cleanHitMeter.Mark(1)
 			cleanReadMeter.Mark(int64(len(blob)))
-			return DecodeAggNode(blob)
+			return blob, nil
 		}
 		cleanMissMeter.Mark(1)
 	}
@@ -110,7 +110,7 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, err
 		return nil, nil
 	}
 
-	return DecodeAggNode(blob)
+	return blob, nil
 }
 
 func (c *aggNodeCache) Reset() {

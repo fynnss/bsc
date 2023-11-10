@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
 // AggNode is a basic structure for aggregate and store two layer trie node.
@@ -17,7 +18,9 @@ type AggNode struct {
 }
 
 func NewAggNode() *AggNode {
-	return aggNodePool.Get().(*AggNode)
+	return &AggNode{
+		nodes: make(map[string][]byte, 2),
+	}
 }
 
 func DecodeAggNode(data []byte) (*AggNode, error) {
@@ -44,6 +47,14 @@ func index(path []byte) string {
 		return ""
 	} else {
 		return string(path[len(path)-1])
+	}
+}
+
+func indexBytes(path []byte) []byte {
+	if len(path)%2 == 0 {
+		return nil
+	} else {
+		return path[len(path)-1:]
 	}
 }
 
@@ -182,12 +193,86 @@ func readFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 			if err != nil {
 				return nil, common.Hash{}, err
 			}
+		}
+		if len(rest) == 0 {
+			break
+		}
+	}
+	return nil, common.Hash{}, nil
+}
+
+func isExist(keys [][]byte, k []byte) bool {
+	for _, key := range keys {
+		if bytes.Compare(key, k) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) {
+	// init rlp encoder
+	w := rlp.NewEncoderBuffer(nil)
+	offset := w.List()
+
+	cnt := 0
+	exist := make([][]byte, 10)
+	for path, n := range nodes {
+		k := indexBytes([]byte(path))
+		if !n.IsDeleted() {
+			writeRawKey(w, k)
+			writeRawNode(w, n.Blob)
+			cnt++
+		}
+		exist = append(exist, k)
+	}
+	// decode the blob
+	if len(blob) != 0 {
+		rest, _, err := rlp.SplitList(blob)
+		if err != nil {
+			return nil, fmt.Errorf("decode error: %v", err)
+		}
+		for {
+			var (
+				key   []byte
+				nBlob []byte
+			)
+			key, rest, err = decodeKey(rest)
+			if err != nil {
+				return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
+			}
+
+			if !isExist(exist, key) {
+				// keep
+				nBlob, rest, err = decodeRawNode(rest)
+				if err != nil {
+					return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
+				}
+				writeRawKey(w, key)
+				writeRawNode(w, nBlob)
+				cnt++
+			} else {
+				// skip
+				_, _, rest, err = rlp.Split(rest)
+				if err != nil {
+					return nil, err
+				}
+			}
 			if len(rest) == 0 {
 				break
 			}
 		}
 	}
-	return nil, common.Hash{}, nil
+
+	if cnt == 0 {
+		w.Reset(nil)
+		return nil, nil
+	} else {
+		w.ListEnd(offset)
+		result := w.ToBytes()
+		w.Flush()
+		return result, nil
+	}
 }
 
 func writeRawNode(w rlp.EncoderBuffer, n []byte) {
@@ -195,6 +280,14 @@ func writeRawNode(w rlp.EncoderBuffer, n []byte) {
 		w.Write(rlp.EmptyString)
 	} else {
 		w.WriteBytes(n)
+	}
+}
+
+func writeRawKey(w rlp.EncoderBuffer, k []byte) {
+	if k == nil {
+		w.Write(rlp.EmptyString)
+	} else {
+		w.WriteBytes(k)
 	}
 }
 
