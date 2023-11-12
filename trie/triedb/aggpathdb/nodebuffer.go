@@ -154,6 +154,7 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 				return
 			}
 			log.Error("failed to flush background nodecahce to disk", "state_id", persistId, "error", err)
+			panic(fmt.Sprintf("failed to flush background node cache to disk. error %v", err))
 		}
 	}(id)
 	return nil

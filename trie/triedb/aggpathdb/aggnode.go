@@ -180,14 +180,10 @@ func readFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 			if err != nil {
 				return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
 			}
-			if len(nBlob) != 0 {
-				h := newHasher()
-				nHash := h.hash(nBlob)
-				h.release()
-				return nBlob, nHash, nil
-			} else {
-				return nil, common.Hash{}, nil
-			}
+			h := newHasher()
+			nHash := h.hash(nBlob)
+			h.release()
+			return nBlob, nHash, nil
 		} else {
 			_, _, rest, err = rlp.Split(rest)
 			if err != nil {
@@ -216,7 +212,7 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 	offset := w.List()
 
 	cnt := 0
-	exist := make([][]byte, 10)
+	excludeList := make([][]byte, 10)
 	for path, n := range nodes {
 		k := indexBytes([]byte(path))
 		if !n.IsDeleted() {
@@ -224,7 +220,7 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 			writeRawNode(w, n.Blob)
 			cnt++
 		}
-		exist = append(exist, k)
+		excludeList = append(excludeList, k)
 	}
 	// decode the blob
 	if len(blob) != 0 {
@@ -242,7 +238,7 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 				return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
 			}
 
-			if !isExist(exist, key) {
+			if !isExist(excludeList, key) {
 				// keep
 				nBlob, rest, err = decodeRawNode(rest)
 				if err != nil {
@@ -265,7 +261,6 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 	}
 
 	if cnt == 0 {
-		w.Reset(nil)
 		return nil, nil
 	} else {
 		w.ListEnd(offset)

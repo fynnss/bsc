@@ -67,13 +67,14 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	} else {
 		nBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
 	}
+	if nBlob == nil {
+		diskFalseMeter.Mark(1)
+		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", common.Hash{})
+		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
+	}
 	n, nHash, err := readFromBlob(path, nBlob)
 	if err != nil {
 		return nil, fmt.Errorf("read from aggnode blob failed. error: %v", err)
-	}
-	if n == nil {
-		// not found
-		return []byte{}, nil
 	}
 
 	if nHash != hash {
