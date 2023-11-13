@@ -212,7 +212,7 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 	offset := w.List()
 
 	cnt := 0
-	excludeList := make([][]byte, 10)
+	excludeList := make([][]byte, 0)
 	for path, n := range nodes {
 		k := indexBytes([]byte(path))
 		if !n.IsDeleted() {
