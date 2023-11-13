@@ -554,7 +554,6 @@ func dbTrieGet(ctx *cli.Context) error {
 			owner        []byte
 			err          error
 			aggNodeBytes []byte
-			aggPathKey   []byte
 		)
 		if ctx.NArg() == 1 {
 			pathKey, err = hexutil.Decode(ctx.Args().Get(0))
@@ -583,8 +582,8 @@ func dbTrieGet(ctx *cli.Context) error {
 			log.Info("Could not read node from agg node", "error", err)
 			return err
 		}
-		log.Info("AggNode: ", "aggPathKey: ", common.Bytes2Hex(aggPathKey), "blob", aggpathdb.AggNodeString(aggNodeBytes))
-		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", nhash.String(), "node: ", trie.NodeString(nhash.Bytes(), node))
+		log.Info("AggNode", "aggPathKey", common.Bytes2Hex(aggPathKey), "Blob", aggpathdb.AggNodeString(aggNodeBytes))
+		log.Info("TrieGet result ", "PathKey", common.Bytes2Hex(pathKey), "Owner", common.BytesToHash(owner), "Hash", nhash.String(), "Node", trie.NodeString(nhash.Bytes(), node))
 	}
 
 	return nil

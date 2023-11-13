@@ -90,9 +90,6 @@ func (c *convertBatcher) writeToDB(force bool) error {
 							"agg_path_key", common.Bytes2Hex([]byte(aggPathKey)))
 						return err
 					}
-					if aggNode == nil {
-						aggNode = aggpathdb.NewAggNode()
-					}
 					aggNodes[owner][aggPathKey] = aggNode
 				}
 				for pathKey, blob := range aggSubset {

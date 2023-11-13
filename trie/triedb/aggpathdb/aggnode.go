@@ -131,7 +131,7 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 		}
 		blob, rest, err = decodeRawNode(rest)
 		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
+			return fmt.Errorf("decode node blob failed in AggNode: %v", err)
 		}
 		n.nodes[string(key)] = blob
 		if len(rest) == 0 {
@@ -154,6 +154,7 @@ func (n *AggNode) encodeTo() []byte {
 	w.Flush()
 	return result
 }
+
 func (n *AggNode) EncodeToBytes() []byte {
 	return n.encodeTo()
 }
@@ -220,7 +221,7 @@ func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 		if bytes.Compare(key, sKey) == 0 {
 			nBlob, rest, err = decodeRawNode(rest)
 			if err != nil {
-				return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
+				return nil, common.Hash{}, fmt.Errorf("decode node blob failed in AggNode: %v", err)
 			}
 			h := newHasher()
 			nHash := h.hash(nBlob)
@@ -372,6 +373,9 @@ func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath
 
 func LoadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) (*AggNode, error) {
 	blob := loadAggNodeFromDatabase(db, owner, aggPath)
+	if len(blob) == 0 {
+		return NewAggNode(), nil
+	}
 	return DecodeAggNode(blob)
 }
 
@@ -409,10 +413,6 @@ func DeleteTrieNodeFromAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValu
 func WriteTrieNodeWithAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValueReader, owner common.Hash, path []byte, node []byte) {
 	aggPath := ToAggPath(path)
 	blob := loadAggNodeFromDatabase(reader, owner, aggPath)
-
-	if blob == nil {
-		return
-	}
 
 	newBlob, err := UpdateToBlob(blob, map[string]*trienode.Node{string(path): trienode.New(NonEmptyHash, node)})
 	if err != nil {
