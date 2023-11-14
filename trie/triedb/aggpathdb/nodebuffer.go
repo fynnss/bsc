@@ -464,8 +464,8 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 
 	// load the node from clean memory cache and update it, then persist it.
 	// load the aggNode from clean memory cache and update it, then persist it.
-	var aggNodesFromDisk sync.Map
 	var group sync.WaitGroup
+	asyncAggNodes := make(map[common.Hash]*sync.Map)
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
 			aggNode, err := cache.aggNode(owner, []byte(aggPath))
@@ -475,6 +475,14 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 			if aggNode == nil {
 				// cache miss
 				group.Add(1)
+				var (
+					tmp *sync.Map
+					ok  bool
+				)
+				if tmp, ok = asyncAggNodes[owner]; !ok {
+					tmp = &sync.Map{}
+					asyncAggNodes[owner] = tmp
+				}
 				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
 					var blob []byte
 					if owner == (common.Hash{}) {
@@ -486,7 +494,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					if err != nil {
 						panic(fmt.Sprintf("Update to blob failed, error %v", err))
 					}
-					aggNodesFromDisk.Store(string(cacheKey(owner, aggPath)), blob)
+					tmp.Store(string(aggPath), blob)
 					group.Done()
 				}(cache.db, owner, []byte(aggPath), cs)
 			} else {
@@ -511,22 +519,25 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 		}
 	}
 	group.Wait()
-	aggNodesFromDisk.Range(func(key, value interface{}) bool {
-		owner, aggPath := parseKey([]byte(key.(string)))
-		if value == nil {
-			deleteAggNode(batch, owner, aggPath)
-			if cache.cleans != nil {
-				cache.cleans.Del(cacheKey(owner, aggPath))
+	for owner, m := range asyncAggNodes {
+		m.Range(func(key, value interface{}) bool {
+			aggPath := []byte(key.(string))
+			if value == nil {
+				deleteAggNode(batch, owner, aggPath)
+				if cache.cleans != nil {
+					cache.cleans.Del(cacheKey(owner, aggPath))
+				}
+			} else {
+				blob := value.([]byte)
+				writeAggNode(batch, owner, aggPath, blob)
+				if cache.cleans != nil {
+					cache.cleans.Set(cacheKey(owner, aggPath), blob)
+				}
 			}
-		} else {
-			blob := value.([]byte)
-			writeAggNode(batch, owner, aggPath, blob)
-			if cache.cleans != nil {
-				cache.cleans.Set(cacheKey(owner, aggPath), blob)
-			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+
 	return total
 }
 
@@ -541,8 +552,9 @@ func cacheKey(owner common.Hash, path []byte) []byte {
 func parseKey(key []byte) (common.Hash, []byte) {
 	if len(key) > common.HashLength {
 		return common.BytesToHash(key[:common.HashLength]), key[common.HashLength+1:]
+	} else if len(key) == common.HashLength {
+		return common.BytesToHash(key), nil
 	} else {
 		return common.Hash{}, key
 	}
-
 }

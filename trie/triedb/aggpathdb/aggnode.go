@@ -154,7 +154,7 @@ func (n *AggNode) encodeTo() []byte {
 	return result
 }
 
-func readFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
+func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 	if len(blob) == 0 {
 		return nil, common.Hash{}, io.ErrUnexpectedEOF
 	}
@@ -199,22 +199,13 @@ func readFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 	return nil, common.Hash{}, nil
 }
 
-func isExist(keys [][]byte, k []byte) bool {
-	for _, key := range keys {
-		if bytes.Compare(key, k) == 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) {
 	// init rlp encoder
 	w := rlp.NewEncoderBuffer(nil)
 	offset := w.List()
 
 	cnt := 0
-	excludeList := make([][]byte, 0)
+	excludeList := make(map[string]struct{})
 	for path, n := range nodes {
 		k := indexBytes([]byte(path))
 		if !n.IsDeleted() {
@@ -222,7 +213,7 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 			writeRawNode(w, n.Blob)
 			cnt++
 		}
-		excludeList = append(excludeList, k)
+		excludeList[string(k)] = struct{}{}
 	}
 	// decode the blob
 	if len(blob) != 0 {
@@ -240,11 +231,12 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 				return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
 			}
 
-			if !isExist(excludeList, key) {
+			_, ok := excludeList[string(key)]
+			if !ok {
 				// keep
 				nBlob, rest, err = decodeRawNode(rest)
 				if err != nil {
-					return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
+					return nil, fmt.Errorf("decode node value in AggNode: %v", err)
 				}
 				writeRawKey(w, key)
 				writeRawNode(w, nBlob)
@@ -343,7 +335,7 @@ func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath
 func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, path []byte) ([]byte, common.Hash) {
 	blob := loadAggNodeFromDatabase(reader, owner, ToAggPath(path))
 
-	nBlob, nHash, err := readFromBlob(path, blob)
+	nBlob, nHash, err := ReadFromBlob(path, blob)
 	if err != nil {
 		return nil, common.Hash{}
 	}
@@ -393,7 +385,7 @@ func WriteTrieNodeWithAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValue
 
 func HasTrieNodeInAggNode(db ethdb.KeyValueReader, owner common.Hash, path []byte) bool {
 	blob := loadAggNodeFromDatabase(db, owner, ToAggPath(path))
-	nBlob, _, err := readFromBlob(path, blob)
+	nBlob, _, err := ReadFromBlob(path, blob)
 	if err != nil {
 		return false
 	}
