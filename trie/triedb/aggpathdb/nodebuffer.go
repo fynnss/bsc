@@ -464,31 +464,69 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 
 	// load the node from clean memory cache and update it, then persist it.
 	// load the aggNode from clean memory cache and update it, then persist it.
+	var aggNodesFromDisk sync.Map
+	var group sync.WaitGroup
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
 			aggNode, err := cache.aggNode(owner, []byte(aggPath))
 			if err != nil {
 				panic(fmt.Sprintf("Decode aggNode failed, error %v", err))
 			}
-			blob, err := UpdateToBlob(aggNode, cs)
-			if err != nil {
-				panic(fmt.Sprintf("Update to blob failed, error %v", err))
-			}
-
-			if blob == nil {
-				deleteAggNode(batch, owner, []byte(aggPath))
-				if cache.cleans != nil {
-					cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
-				}
+			if aggNode == nil {
+				// cache miss
+				group.Add(1)
+				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
+					var blob []byte
+					if owner == (common.Hash{}) {
+						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
+					} else {
+						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
+					}
+					blob, err := UpdateToBlob(blob, cs)
+					if err != nil {
+						panic(fmt.Sprintf("Update to blob failed, error %v", err))
+					}
+					aggNodesFromDisk.Store(string(cacheKey(owner, aggPath)), blob)
+					group.Done()
+				}(cache.db, owner, []byte(aggPath), cs)
 			} else {
-				writeAggNode(batch, owner, []byte(aggPath), blob)
-				if cache.cleans != nil {
-					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), blob)
+				var blob []byte
+				blob, err := UpdateToBlob(aggNode, cs)
+				if err != nil {
+					panic(fmt.Sprintf("Update to blob failed, error %v", err))
+				}
+				total++
+				if blob == nil {
+					deleteAggNode(batch, owner, []byte(aggPath))
+					if cache.cleans != nil {
+						cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
+					}
+				} else {
+					writeAggNode(batch, owner, []byte(aggPath), blob)
+					if cache.cleans != nil {
+						cache.cleans.Set(cacheKey(owner, []byte(aggPath)), blob)
+					}
 				}
 			}
-			total++
 		}
 	}
+	group.Wait()
+	aggNodesFromDisk.Range(func(key, value interface{}) bool {
+		owner, aggPath := parseKey([]byte(key.(string)))
+		if value == nil {
+			deleteAggNode(batch, owner, aggPath)
+			if cache.cleans != nil {
+				cache.cleans.Del(cacheKey(owner, aggPath))
+			}
+		} else {
+			blob := value.([]byte)
+			writeAggNode(batch, owner, aggPath, blob)
+			if cache.cleans != nil {
+				cache.cleans.Set(cacheKey(owner, aggPath), blob)
+			}
+		}
+		return true
+	})
 	return total
 }
 
@@ -498,4 +536,13 @@ func cacheKey(owner common.Hash, path []byte) []byte {
 		return path
 	}
 	return append(owner.Bytes(), path...)
+}
+
+func parseKey(key []byte) (common.Hash, []byte) {
+	if len(key) > common.HashLength {
+		return common.BytesToHash(key[:common.HashLength]), key[common.HashLength+1:]
+	} else {
+		return common.Hash{}, key
+	}
+
 }

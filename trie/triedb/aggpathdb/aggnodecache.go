@@ -103,18 +103,7 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) ([]byte, error
 		}
 		cleanMissMeter.Mark(1)
 	}
-
-	// cache miss
-	if owner == (common.Hash{}) {
-		blob = rawdb.ReadAccountTrieAggNode(c.db.diskdb, aggPath)
-	} else {
-		blob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
-	}
-	if blob == nil {
-		return nil, nil
-	}
-
-	return blob, nil
+	return nil, nil
 }
 
 func (c *aggNodeCache) Reset() {

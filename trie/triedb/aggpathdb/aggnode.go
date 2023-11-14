@@ -12,6 +12,8 @@ import (
 	"github.com/ethereum/go-ethereum/trie/trienode"
 )
 
+var NonEmptyHash = common.BytesToHash([]byte("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421"))
+
 // AggNode is a basic structure for aggregate and store two layer trie node.
 type AggNode struct {
 	nodes map[string][]byte
@@ -19,7 +21,7 @@ type AggNode struct {
 
 func NewAggNode() *AggNode {
 	return &AggNode{
-		nodes: make(map[string][]byte, 2),
+		nodes: make(map[string][]byte),
 	}
 }
 
@@ -330,74 +332,74 @@ func deleteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte) {
 	}
 }
 
-func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) (*AggNode, error) {
-	var blob []byte
+func loadAggNodeFromDatabase(db ethdb.KeyValueReader, owner common.Hash, aggPath []byte) []byte {
 	if owner == (common.Hash{}) {
-		blob = rawdb.ReadAccountTrieAggNode(db, aggPath)
+		return rawdb.ReadAccountTrieAggNode(db, aggPath)
 	} else {
-		blob = rawdb.ReadStorageTrieAggNode(db, owner, aggPath)
+		return rawdb.ReadStorageTrieAggNode(db, owner, aggPath)
 	}
-
-	if blob == nil {
-		return nil, nil
-	}
-
-	return DecodeAggNode(blob)
 }
 
 func ReadTrieNodeFromAggNode(reader ethdb.KeyValueReader, owner common.Hash, path []byte) ([]byte, common.Hash) {
-	aggPath := ToAggPath(path)
-	aggNode, err := loadAggNodeFromDatabase(reader, owner, aggPath)
+	blob := loadAggNodeFromDatabase(reader, owner, ToAggPath(path))
+
+	nBlob, nHash, err := readFromBlob(path, blob)
 	if err != nil {
-		panic(fmt.Sprintf("Decode account trie node failed. error: %v", err))
-	}
-	if aggNode == nil {
 		return nil, common.Hash{}
 	}
 
-	return aggNode.Node(path)
+	return nBlob, nHash
 }
 
 func DeleteTrieNodeFromAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValueReader, owner common.Hash, path []byte) {
 	aggPath := ToAggPath(path)
-	aggNode, err := loadAggNodeFromDatabase(reader, owner, aggPath)
-	if err != nil {
-		panic(fmt.Sprintf("Decode account trie node failed. error: %v", err))
-	}
-	if aggNode == nil {
+	blob := loadAggNodeFromDatabase(reader, owner, aggPath)
+
+	if blob == nil {
 		return
 	}
-	aggNode.Delete(path)
 
-	if aggNode.Empty() {
+	newBlob, err := UpdateToBlob(blob, map[string]*trienode.Node{string(path): trienode.NewDeleted()})
+	if err != nil {
+		return
+	}
+
+	if newBlob == nil {
 		deleteAggNode(writer, owner, aggPath)
 	} else {
-		writeAggNode(writer, owner, aggPath, aggNode.encodeTo())
+		writeAggNode(writer, owner, aggPath, newBlob)
 	}
 }
 
 func WriteTrieNodeWithAggNode(writer ethdb.KeyValueWriter, reader ethdb.KeyValueReader, owner common.Hash, path []byte, node []byte) {
 	aggPath := ToAggPath(path)
-	aggNode, err := loadAggNodeFromDatabase(reader, owner, aggPath)
-	if err != nil {
-		panic(fmt.Sprintf("Decode account trie node failed. error: %v", err))
-	}
-	if aggNode == nil {
+	blob := loadAggNodeFromDatabase(reader, owner, aggPath)
+
+	if blob == nil {
 		return
 	}
-	aggNode.Update(path, node)
 
-	writeAggNode(writer, owner, aggPath, aggNode.encodeTo())
+	newBlob, err := UpdateToBlob(blob, map[string]*trienode.Node{string(path): trienode.New(NonEmptyHash, node)})
+	if err != nil {
+		return
+	}
+
+	if newBlob == nil {
+		deleteAggNode(writer, owner, aggPath)
+	} else {
+		writeAggNode(writer, owner, aggPath, newBlob)
+	}
 }
 
 func HasTrieNodeInAggNode(db ethdb.KeyValueReader, owner common.Hash, path []byte) bool {
-	aggPath := ToAggPath(path)
-	aggNode, err := loadAggNodeFromDatabase(db, owner, aggPath)
+	blob := loadAggNodeFromDatabase(db, owner, ToAggPath(path))
+	nBlob, _, err := readFromBlob(path, blob)
 	if err != nil {
-		panic(fmt.Sprintf("Decode account trie node failed. error: %v", err))
-	}
-	if aggNode == nil {
 		return false
 	}
-	return aggNode.Has(path)
+
+	if nBlob == nil {
+		return true
+	}
+	return false
 }
