@@ -145,7 +145,7 @@ func (n *AggNode) encodeTo() []byte {
 	offset := w.List()
 
 	for k, blob := range n.nodes {
-		w.WriteBytes([]byte(k))
+		writeRawKey(w, []byte(k))
 		writeRawNode(w, blob)
 	}
 	w.ListEnd(offset)
