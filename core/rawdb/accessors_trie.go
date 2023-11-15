@@ -181,7 +181,7 @@ func ReadAccountTrieAggNode(db ethdb.KeyValueReader, path []byte) []byte {
 			errors.Is(err, memorydb.ErrMemorydbNotFound) {
 			return nil
 		} else {
-			panic(fmt.Sprintf("Failed to get storage agg node, error %v", err))
+			panic(fmt.Sprintf("Failed to get account agg node, error %v", err))
 		}
 	}
 	return data

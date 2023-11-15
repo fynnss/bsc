@@ -48,7 +48,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 				return n, nil
 			}
 			cleanFalseMeter.Mark(1)
-			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", nHash)
+			log.Error("Unexpected trie node in agg clean cache", "owner", owner, "path", path, "expect", hash, "got", nHash)
 		}
 		cleanMissMeter.Mark(1)
 	}

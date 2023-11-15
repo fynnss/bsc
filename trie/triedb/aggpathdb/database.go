@@ -52,6 +52,7 @@ const (
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
 	DefaultDirtyBufferSize = 64 * 1024 * 1024
+
 	// DefaultBackgroundFlushInterval defines the default the wait interval
 	// that background node cache flush disk.
 	DefaultBackgroundFlushInterval = 3

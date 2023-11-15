@@ -51,11 +51,7 @@ func (a *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 		return nil, err
 	}
 	if node == nil {
-		n, err := a.background.node(owner, path, hash)
-		if err != nil {
-			return nil, err
-		}
-		return trienode.New(n.Hash, common.CopyBytes(n.Blob)), nil
+		return a.background.node(owner, path, hash)
 	}
 	return node, nil
 }
@@ -484,20 +480,21 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					tmp = &sync.Map{}
 					asyncAggNodes[owner] = tmp
 				}
-				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
+
+				go func(db *Database, owner common.Hash, aggPath []byte, changeNodes map[string]*trienode.Node) {
 					var blob []byte
 					if owner == (common.Hash{}) {
 						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
 					} else {
 						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
 					}
-					blob, err := UpdateToBlob(blob, cs)
+					blob, err := UpdateToBlob(blob, changeNodes)
 					if err != nil {
 						panic(fmt.Sprintf("Update to blob failed, error %v", err))
 					}
 					tmp.Store(string(aggPath), blob)
 					group.Done()
-				}(cache.db, owner, []byte(aggPath), cs)
+				}(cache.db, common.BytesToHash(owner.Bytes()), common.CopyBytes([]byte(aggPath)), preaggnodes[owner][aggPath])
 			} else {
 				var blob []byte
 				blob, err := UpdateToBlob(aggNode, cs)
