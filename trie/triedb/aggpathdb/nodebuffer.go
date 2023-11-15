@@ -51,7 +51,11 @@ func (a *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 		return nil, err
 	}
 	if node == nil {
-		return a.background.node(owner, path, hash)
+		n, err := a.background.node(owner, path, hash)
+		if err != nil {
+			return nil, err
+		}
+		return trienode.New(n.Hash, common.CopyBytes(n.Blob)), nil
 	}
 	return node, nil
 }
@@ -468,10 +472,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	asyncAggNodes := make(map[common.Hash]*sync.Map)
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
-			aggNode, err := cache.aggNode(owner, []byte(aggPath))
-			if err != nil {
-				panic(fmt.Sprintf("Decode aggNode failed, error %v", err))
-			}
+			aggNode := cache.aggNode(owner, []byte(aggPath))
 			if aggNode == nil {
 				// cache miss
 				group.Add(1)

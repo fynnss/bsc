@@ -90,7 +90,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	return n, nil
 }
 
-func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) ([]byte, error) {
+func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) []byte {
 	var blob []byte
 	cKey := cacheKey(owner, aggPath)
 	if c.cleans != nil {
@@ -99,11 +99,11 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) ([]byte, error
 		if cacheHit {
 			cleanHitMeter.Mark(1)
 			cleanReadMeter.Mark(int64(len(blob)))
-			return blob, nil
+			return blob
 		}
 		cleanMissMeter.Mark(1)
 	}
-	return nil, nil
+	return nil
 }
 
 func (c *aggNodeCache) Reset() {

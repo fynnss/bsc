@@ -544,6 +544,7 @@ func dbTrieGet(ctx *cli.Context) error {
 			owner        []byte
 			err          error
 			aggNodeBytes []byte
+			aggPathKey   []byte
 		)
 		if ctx.NArg() == 1 {
 			pathKey, err = hexutil.Decode(ctx.Args().Get(0))
@@ -551,7 +552,7 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Error("Could not decode the value", "error", err)
 				return err
 			}
-			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggPathKey = aggpathdb.ToAggPath(pathKey)
 			aggNodeBytes = rawdb.ReadAccountTrieAggNode(db, aggPathKey)
 		} else if ctx.NArg() == 2 {
 			owner, err = hexutil.Decode(ctx.Args().Get(0))
@@ -564,7 +565,7 @@ func dbTrieGet(ctx *cli.Context) error {
 				log.Info("Could not decode the value", "error", err)
 				return err
 			}
-			aggPathKey := aggpathdb.ToAggPath(pathKey)
+			aggPathKey = aggpathdb.ToAggPath(pathKey)
 			aggNodeBytes = rawdb.ReadStorageTrieAggNode(db, common.BytesToHash(owner), aggPathKey)
 		}
 		node, nhash, err := aggpathdb.ReadFromBlob(pathKey, aggNodeBytes)
@@ -572,7 +573,8 @@ func dbTrieGet(ctx *cli.Context) error {
 			log.Info("Could not read node from agg node", "error", err)
 			return err
 		}
-		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", trie.NodeString(nhash.Bytes(), node))
+		log.Info("AggNode: ", "aggPathKey: ", common.Bytes2Hex(aggPathKey), "blob", aggpathdb.AggNodeString(aggNodeBytes))
+		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", nhash.String(), "node: ", trie.NodeString(nhash.Bytes(), node))
 	}
 
 	return nil

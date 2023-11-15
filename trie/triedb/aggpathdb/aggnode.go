@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -152,6 +153,42 @@ func (n *AggNode) encodeTo() []byte {
 	result := w.ToBytes()
 	w.Flush()
 	return result
+}
+
+func AggNodeString(blob []byte) string {
+	builder := strings.Builder{}
+
+	rest, _, err := rlp.SplitList(blob)
+	if err != nil {
+		return ""
+	}
+	if len(rest) == 0 {
+		return ""
+	}
+
+	for {
+		var (
+			key   []byte
+			nBlob []byte
+		)
+		key, rest, err = decodeKey(rest)
+		if err != nil {
+			return ""
+		}
+		nBlob, rest, err = decodeRawNode(rest)
+		if err != nil {
+			return ""
+		}
+		h := newHasher()
+		nHash := h.hash(nBlob)
+		h.release()
+
+		builder.WriteString(fmt.Sprintf("%s: %v, ", common.Bytes2Hex(key), nHash.String()))
+		if len(rest) == 0 {
+			break
+		}
+	}
+	return builder.String()
 }
 
 func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
