@@ -231,22 +231,16 @@ func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) 
 				return nil, fmt.Errorf("decode node key failed in AggNode: %v", err)
 			}
 
+			nBlob, rest, err = decodeRawNode(rest)
+			if err != nil {
+				return nil, fmt.Errorf("decode node value in AggNode: %v", err)
+			}
 			_, ok := excludeList[string(key)]
 			if !ok {
 				// keep
-				nBlob, rest, err = decodeRawNode(rest)
-				if err != nil {
-					return nil, fmt.Errorf("decode node value in AggNode: %v", err)
-				}
 				writeRawKey(w, key)
 				writeRawNode(w, nBlob)
 				cnt++
-			} else {
-				// skip
-				_, _, rest, err = rlp.Split(rest)
-				if err != nil {
-					return nil, err
-				}
 			}
 			if len(rest) == 0 {
 				break
