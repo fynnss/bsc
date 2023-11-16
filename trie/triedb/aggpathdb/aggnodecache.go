@@ -92,10 +92,9 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 
 func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) []byte {
 	var blob []byte
-	cKey := cacheKey(owner, aggPath)
 	if c.cleans != nil {
 		cacheHit := false
-		blob, cacheHit = c.cleans.HasGet(nil, cKey)
+		blob, cacheHit = c.cleans.HasGet(nil, cacheKey(owner, aggPath))
 		if cacheHit {
 			cleanHitMeter.Mark(1)
 			cleanReadMeter.Mark(int64(len(blob)))
@@ -103,7 +102,12 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) []byte {
 		}
 		cleanMissMeter.Mark(1)
 	}
-	return nil
+	if owner == (common.Hash{}) {
+		blob = rawdb.ReadAccountTrieAggNode(c.db.diskdb, aggPath)
+	} else {
+		blob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
+	}
+	return blob
 }
 
 func (c *aggNodeCache) Reset() {

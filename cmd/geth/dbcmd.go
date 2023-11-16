@@ -568,15 +568,18 @@ func dbTrieGet(ctx *cli.Context) error {
 			aggPathKey = aggpathdb.ToAggPath(pathKey)
 			aggNodeBytes = rawdb.ReadStorageTrieAggNode(db, common.BytesToHash(owner), aggPathKey)
 		}
-		node, nhash, err := aggpathdb.ReadFromBlob(pathKey, aggNodeBytes)
-		if err != nil {
-			log.Info("Could not read node from agg node", "error", err)
-			return err
+		if aggNodeBytes == nil {
+			log.Info("Could not find the agg node")
+		} else {
+			node, nhash, err := aggpathdb.ReadFromBlob(pathKey, aggNodeBytes)
+			if err != nil {
+				log.Info("Could not read node from agg node", "error", err)
+				return err
+			}
+			log.Info("AggNode: ", "aggPathKey: ", common.Bytes2Hex(aggPathKey), "blob", aggpathdb.AggNodeString(aggNodeBytes))
+			log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", nhash.String(), "node: ", trie.NodeString(nhash.Bytes(), node))
 		}
-		log.Info("AggNode: ", "aggPathKey: ", common.Bytes2Hex(aggPathKey), "blob", aggpathdb.AggNodeString(aggNodeBytes))
-		log.Info("TrieGet result ", "PathKey: ", common.Bytes2Hex(pathKey), "Owner: ", common.BytesToHash(owner), "Hash: ", nhash.String(), "node: ", trie.NodeString(nhash.Bytes(), node))
 	}
-
 	return nil
 }
 

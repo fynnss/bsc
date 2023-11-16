@@ -204,7 +204,7 @@ func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 		return nil, common.Hash{}, nil
 	}
 
-	sKey := []byte(index(path))
+	sKey := indexBytes(path)
 	for {
 		var (
 			key   []byte
@@ -214,20 +214,15 @@ func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 		if err != nil {
 			return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
 		}
+		nBlob, rest, err = decodeRawNode(rest)
+		if err != nil {
+			return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
+		}
 		if bytes.Compare(key, sKey) == 0 {
-			nBlob, rest, err = decodeRawNode(rest)
-			if err != nil {
-				return nil, common.Hash{}, fmt.Errorf("decode node key failed in AggNode: %v", err)
-			}
 			h := newHasher()
 			nHash := h.hash(nBlob)
 			h.release()
 			return nBlob, nHash, nil
-		} else {
-			_, _, rest, err = rlp.Split(rest)
-			if err != nil {
-				return nil, common.Hash{}, err
-			}
 		}
 		if len(rest) == 0 {
 			break
