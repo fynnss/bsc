@@ -476,11 +476,25 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 			}
 			total++
 			if newBlob == nil {
+				for _, n := range cs {
+					if !n.IsDeleted() {
+						panic("the agg node is nil after update. But non-deleted node exist.")
+					}
+				}
 				deleteAggNode(batch, owner, []byte(aggPath))
 				if cache.cleans != nil {
 					cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
 				}
 			} else {
+				for p, n := range cs {
+					_, nhash, err := ReadFromBlob([]byte(p), newBlob)
+					if err != nil {
+						panic("read from blob failed.")
+					}
+					if nhash != n.Hash {
+						panic("Update failed. hash is inconsistent")
+					}
+				}
 				writeAggNode(batch, owner, []byte(aggPath), newBlob)
 				if cache.cleans != nil {
 					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), newBlob)
