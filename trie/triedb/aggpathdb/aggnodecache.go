@@ -1,6 +1,7 @@
 package aggpathdb
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -11,8 +12,9 @@ import (
 )
 
 type aggNodeCache struct {
-	cleans *fastcache.Cache
-	db     *Database // Agg-Path-based trie database
+	cleans        *fastcache.Cache
+	db            *Database // Agg-Path-based trie database
+	debugLogCount uint64
 }
 
 func newAggNodeCache(db *Database, cleans *fastcache.Cache, cacheSize int) *aggNodeCache {
@@ -22,8 +24,9 @@ func newAggNodeCache(db *Database, cleans *fastcache.Cache, cacheSize int) *aggN
 
 	log.Info("Allocated agg node cache", "size", cacheSize)
 	return &aggNodeCache{
-		cleans: cleans,
-		db:     db,
+		cleans:        cleans,
+		db:            db,
+		debugLogCount: 0,
 	}
 }
 
@@ -83,8 +86,36 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
 	}
 	if c.cleans != nil {
-		c.cleans.Set(key, nBlob)
-		cleanWriteMeter.Mark(int64(len(nBlob)))
+		if !c.cleans.Has(key) {
+			c.cleans.Set(key, nBlob)
+			cleanWriteMeter.Mark(int64(len(nBlob)))
+		} else {
+			c.debugLogCount++
+			oldBlob := c.cleans.Get(nil, key)
+			if c.debugLogCount%10000 == 0 {
+				if len(oldBlob) > 0 {
+					log.Info("Skip update agg clean cache",
+						"owner", owner.String(),
+						"agg_path", common.Bytes2Hex(aggPath),
+						"path", common.Bytes2Hex(path),
+						"old_agg_node", AggNodeString(oldBlob))
+				}
+				log.Info("Skip update agg clean cache",
+					"owner", owner.String(),
+					"agg_path", common.Bytes2Hex(aggPath),
+					"path", common.Bytes2Hex(path),
+					"new_agg_node", AggNodeString(nBlob))
+			}
+			if bytes.Compare(oldBlob, nBlob) != 0 {
+				log.Error("agg node can not keep consist",
+					"owner", owner.String(),
+					"agg_path", common.Bytes2Hex(aggPath),
+					"path", common.Bytes2Hex(path),
+					"old_agg_node", AggNodeString(oldBlob),
+					"new_agg_node", AggNodeString(nBlob))
+			}
+
+		}
 	}
 
 	return n, nil
