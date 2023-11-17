@@ -467,41 +467,79 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 
 	// load the node from clean memory cache and update it, then persist it.
 	// load the aggNode from clean memory cache and update it, then persist it.
+	var group sync.WaitGroup
+	asyncAggNodes := make(map[common.Hash]*sync.Map)
+
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
-			aggNodeBlob := cache.aggNode(owner, []byte(aggPath))
-			newBlob, err := UpdateToBlob(aggNodeBlob, cs)
-			if err != nil {
-				panic(fmt.Sprintf("Update to blob failed, error %v", err))
-			}
-			total++
-			if newBlob == nil {
-				for _, n := range cs {
-					if !n.IsDeleted() {
-						panic("the agg node is nil after update. But non-deleted node exist.")
+			aggNode := cache.aggNode(owner, []byte(aggPath))
+			if aggNode == nil {
+				// cache miss
+				group.Add(1)
+				var (
+					tmp *sync.Map
+					ok  bool
+				)
+				if tmp, ok = asyncAggNodes[owner]; !ok {
+					tmp = &sync.Map{}
+					asyncAggNodes[owner] = tmp
+				}
+				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
+					var blob []byte
+					if owner == (common.Hash{}) {
+						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
+					} else {
+						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
 					}
-				}
-				deleteAggNode(batch, owner, []byte(aggPath))
-				if cache.cleans != nil {
-					cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
-				}
-			} else {
-				for p, n := range cs {
-					_, nhash, err := ReadFromBlob([]byte(p), newBlob)
+					blob, err := UpdateToBlob(blob, cs)
 					if err != nil {
-						panic("read from blob failed.")
+						panic(fmt.Sprintf("Update to blob failed, error %v", err))
 					}
-					if nhash != n.Hash {
-						panic("Update failed. hash is inconsistent")
+					tmp.Store(string(aggPath), blob)
+					if cache.cleans != nil {
+						if blob == nil {
+							cache.cleans.Del(cacheKey(owner, aggPath))
+						} else {
+							cache.cleans.Set(cacheKey(owner, aggPath), blob)
+						}
 					}
+					group.Done()
+				}(cache.db, common.BytesToHash(owner.Bytes()), common.CopyBytes([]byte(aggPath)), preaggnodes[owner][aggPath])
+			} else {
+				var blob []byte
+				blob, err := UpdateToBlob(aggNode, cs)
+				if err != nil {
+					panic(fmt.Sprintf("Update to blob failed, error %v", err))
 				}
-				writeAggNode(batch, owner, []byte(aggPath), newBlob)
-				if cache.cleans != nil {
-					cache.cleans.Set(cacheKey(owner, []byte(aggPath)), newBlob)
+				total++
+				if blob == nil {
+					deleteAggNode(batch, owner, []byte(aggPath))
+					if cache.cleans != nil {
+						cache.cleans.Del(cacheKey(owner, []byte(aggPath)))
+					}
+				} else {
+					writeAggNode(batch, owner, []byte(aggPath), blob)
+					if cache.cleans != nil {
+						cache.cleans.Set(cacheKey(owner, []byte(aggPath)), blob)
+					}
 				}
 			}
 		}
 	}
+	group.Wait()
+	for owner, m := range asyncAggNodes {
+		m.Range(func(key, value interface{}) bool {
+			aggPath := []byte(key.(string))
+			if value == nil {
+				deleteAggNode(batch, owner, aggPath)
+			} else {
+				blob := value.([]byte)
+				writeAggNode(batch, owner, aggPath, blob)
+			}
+			return true
+		})
+	}
+
 	return total
 }
 
