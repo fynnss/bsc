@@ -112,13 +112,6 @@ func (a *nodebuffer) empty() bool {
 	return a.current.empty() && a.background.empty()
 }
 
-// setSize sets the buffer size to the provided number, and invokes a flush
-// operation if the current memory usage exceeds the new limit.
-//func (b *nodebuffer) setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
-//	b.limit = uint64(size)
-//	return b.flush(db, clean, id, false)
-//}
-
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
 func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint64, force bool) error {
@@ -153,11 +146,10 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 		for {
 			err := a.background.flush(db, clean, persistId)
 			if err == nil {
-				log.Debug("succeed to flush background nodecahce to disk", "state_id", persistId)
+				log.Debug("Succeed to flush background node buffer to disk", "state_id", persistId)
 				return
 			}
-			log.Error("failed to flush background nodecahce to disk", "state_id", persistId, "error", err)
-			panic(fmt.Sprintf("failed to flush background node cache to disk. error %v", err))
+			log.Crit("Failed to flush background node buffer to disk", "state_id", persistId, "error", err)
 		}
 	}(id)
 	return nil
@@ -314,7 +306,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, cleans *aggNodeCache, id uint
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Debug("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
@@ -493,7 +485,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					}
 					blob, err := UpdateToBlob(blob, cs)
 					if err != nil {
-						panic(fmt.Sprintf("Update to blob failed, error %v", err))
+						log.Crit("Update to blob failed", "error", err)
 					}
 					tmp.Store(string(aggPath), blob)
 					if cache.cleans != nil {
@@ -509,7 +501,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 				var blob []byte
 				blob, err := UpdateToBlob(aggNode, cs)
 				if err != nil {
-					panic(fmt.Sprintf("Update to blob failed, error %v", err))
+					log.Crit("Update to blob failed", "error", err)
 				}
 				total++
 				if blob == nil {

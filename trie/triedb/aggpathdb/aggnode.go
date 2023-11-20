@@ -131,7 +131,7 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 		}
 		blob, rest, err = decodeRawNode(rest)
 		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
+			return fmt.Errorf("decode raw node failed in AggNode: %v", err)
 		}
 		n.nodes[string(key)] = blob
 		if len(rest) == 0 {
@@ -344,9 +344,9 @@ func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, ag
 
 func deleteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte) {
 	if owner == (common.Hash{}) {
-		rawdb.DeleteAccountTrieNode(db, aggPath)
+		rawdb.DeleteAccountTrieAggNode(db, aggPath)
 	} else {
-		rawdb.DeleteStorageTrieNode(db, owner, aggPath)
+		rawdb.DeleteStorageTrieAggNode(db, owner, aggPath)
 	}
 }
 
