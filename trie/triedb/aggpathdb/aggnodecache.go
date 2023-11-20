@@ -83,9 +83,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
 	}
 	if c.cleans != nil {
-		if !c.cleans.Has(key) {
-			c.cleans.Set(key, nBlob)
-		}
+		c.cleans.LoadOrSet(nil, key, nBlob)
 		cleanWriteMeter.Mark(int64(len(nBlob)))
 	}
 
