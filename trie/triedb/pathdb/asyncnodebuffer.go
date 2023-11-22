@@ -49,6 +49,9 @@ func (a *asyncnodebuffer) node(owner common.Hash, path []byte, hash common.Hash)
 	a.mux.RLock()
 	defer a.mux.RUnlock()
 
+	start := time.Now()
+	defer dirtyBufferQueryTimer.UpdateSince(start)
+
 	node, err := a.current.node(owner, path, hash)
 	if err != nil {
 		return nil, err
@@ -153,10 +156,10 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		for {
 			err := a.background.flush(db, clean, persistId)
 			if err == nil {
-				log.Debug("succeed to flush background nodecahce to disk", "state_id", persistId)
+				log.Debug("Succeed to flush background node buffer to disk", "state_id", persistId)
 				return
 			}
-			log.Error("failed to flush background nodecahce to disk", "state_id", persistId, "error", err)
+			log.Error("Failed to flush background node buffer to disk", "state_id", persistId, "error", err)
 		}
 	}(id)
 	return nil
@@ -313,7 +316,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Debug("Persisted pathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted pathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }

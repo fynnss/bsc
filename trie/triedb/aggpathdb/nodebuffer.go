@@ -46,6 +46,9 @@ func (a *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 	a.mux.RLock()
 	defer a.mux.RUnlock()
 
+	start := time.Now()
+	defer dirtyBufferQueryTimer.UpdateSince(start)
+
 	node, err := a.current.node(owner, path, hash)
 	if err != nil {
 		return nil, err
@@ -131,11 +134,13 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 	}
 
 	if a.current.size < a.current.limit {
+		log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
 		return nil
 	}
 
 	// background flush doing
 	if atomic.LoadUint64(&a.background.immutable) == 1 {
+		log.Info("Skip flush due to background buffer is flushing", "background_size", a.background.size)
 		return nil
 	}
 
@@ -235,14 +240,14 @@ func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) err
 			current = make(map[string]*trienode.Node)
 			for path, n := range subset {
 				current[path] = n
-				delta += int64(len(n.Blob) + len(path))
+				delta += int64(len(n.Blob) + len(path) + len(owner))
 			}
 			nc.nodes[owner] = current
 			continue
 		}
 		for path, n := range subset {
 			if orig, exist := current[path]; !exist {
-				delta += int64(len(n.Blob) + len(path))
+				delta += int64(len(n.Blob) + len(path) + len(owner))
 			} else {
 				delta += int64(len(n.Blob) - len(orig.Blob))
 				overwrite++
@@ -306,7 +311,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, cleans *aggNodeCache, id uint
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "batch_size", size, "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
@@ -521,6 +526,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	group.Wait()
 	for owner, m := range asyncAggNodes {
 		m.Range(func(key, value interface{}) bool {
+			total++
 			aggPath := []byte(key.(string))
 			if value == nil {
 				deleteAggNode(batch, owner, aggPath)

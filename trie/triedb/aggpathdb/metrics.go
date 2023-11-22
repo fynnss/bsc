@@ -51,4 +51,7 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("aggpathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("aggpathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("aggpathdb/history/bytes/index", nil)
+
+	// for perf performance
+	dirtyBufferQueryTimer = metrics.NewRegisteredTimer("aggpathdb/dirty/query/time", nil)
 )
