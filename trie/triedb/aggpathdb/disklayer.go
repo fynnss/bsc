@@ -49,6 +49,7 @@ func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *aggNodeCach
 	// the original disk layer).
 	if cleans == nil && db.config.CleanCacheSize != 0 {
 		cleans = newAggNodeCache(db, nil, db.config.CleanCacheSize)
+		log.Info("Allocated agg path cache", "size", db.config.CleanCacheSize)
 	}
 	return &diskLayer{
 		root:   root,

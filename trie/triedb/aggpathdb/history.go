@@ -600,6 +600,9 @@ func truncateFromHead(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, nhead 
 // truncateFromTail removes the extra state histories from the tail with the given
 // parameters. It returns the number of items removed from the tail.
 func truncateFromTail(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, ntail uint64) (int, error) {
+	start := time.Now()
+	defer historyTruncateTimeMeter.UpdateSince(start)
+
 	otail, err := freezer.Tail()
 	if err != nil {
 		return 0, err

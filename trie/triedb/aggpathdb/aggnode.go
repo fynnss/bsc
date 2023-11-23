@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -192,6 +193,9 @@ func AggNodeString(blob []byte) string {
 }
 
 func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
+	start := time.Now()
+	defer perfReadFromBlobTimer.UpdateSince(start)
+
 	if len(blob) == 0 {
 		return nil, common.Hash{}, io.ErrUnexpectedEOF
 	}
@@ -232,6 +236,9 @@ func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 }
 
 func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) {
+	start := time.Now()
+	defer perfUpdateToBlobTimer.UpdateSince(start)
+
 	// init rlp encoder
 	w := rlp.NewEncoderBuffer(nil)
 	offset := w.List()

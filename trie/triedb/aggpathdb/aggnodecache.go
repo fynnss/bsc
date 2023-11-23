@@ -19,8 +19,6 @@ func newAggNodeCache(db *Database, cleans *fastcache.Cache, cacheSize int) *aggN
 	if cleans == nil {
 		cleans = fastcache.New(cacheSize)
 	}
-
-	log.Info("Allocated agg node cache", "size", cacheSize)
 	return &aggNodeCache{
 		cleans: cleans,
 		db:     db,
@@ -91,16 +89,13 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 }
 
 func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) []byte {
-	var blob []byte
+	start := time.Now()
+	defer perfCacheAggnodeTotalTimer.UpdateSince(start)
 	if c.cleans != nil {
-		cacheHit := false
-		blob, cacheHit = c.cleans.HasGet(nil, cacheKey(owner, aggPath))
+		blob, cacheHit := c.cleans.HasGet(nil, cacheKey(owner, aggPath))
 		if cacheHit {
-			cleanHitMeter.Mark(1)
-			cleanReadMeter.Mark(int64(len(blob)))
 			return blob
 		}
-		cleanMissMeter.Mark(1)
 	}
 	return nil
 }

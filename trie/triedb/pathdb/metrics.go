@@ -54,5 +54,6 @@ var (
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("pathdb/history/bytes/index", nil)
 
 	// for perf performance
-	dirtyBufferQueryTimer = metrics.NewRegisteredTimer("pathdb/dirty/query/time", nil)
+	dirtyBufferQueryTimer    = metrics.NewRegisteredTimer("pathdb/dirty/query/time", nil)
+	historyTruncateTimeMeter = metrics.NewRegisteredTimer("pathdb/history/truncate/time", nil)
 )

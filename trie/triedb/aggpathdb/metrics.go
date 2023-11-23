@@ -53,5 +53,11 @@ var (
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("aggpathdb/history/bytes/index", nil)
 
 	// for perf performance
-	dirtyBufferQueryTimer = metrics.NewRegisteredTimer("aggpathdb/dirty/query/time", nil)
+	dirtyBufferQueryTimer      = metrics.NewRegisteredTimer("aggpathdb/dirty/query/time", nil)
+	historyTruncateTimeMeter   = metrics.NewRegisteredTimer("aggpathdb/history/truncate/time", nil)
+	perfReadFromBlobTimer      = metrics.NewRegisteredTimer("aggpathdb/perf/query/time", nil)
+	perfUpdateToBlobTimer      = metrics.NewRegisteredTimer("aggpathdb/perf/update/time", nil)
+	perfAggregateWriteTimer    = metrics.NewRegisteredTimer("aggpathdb/perf/aggregate/time", nil)
+	perfCacheAggnodeTotalTimer = metrics.NewRegisteredTimer("aggpathdb/clean/total/time", nil)
+	perfCacheAggnodeMissTimer  = metrics.NewRegisteredTimer("aggpathdb/clean/miss/time", nil)
 )

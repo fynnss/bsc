@@ -311,7 +311,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, cleans *aggNodeCache, id uint
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "batch_size", size, "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
@@ -444,6 +444,9 @@ func copyNodeCache(n *nodecache) *nodecache {
 // aggregateAndWriteAggNodes will persist all agg node into the database
 // Note this function will inject all the clean node into the cleanCache
 func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[string]*trienode.Node, cache *aggNodeCache) (total int) {
+	start := time.Now()
+	defer perfAggregateWriteTimer.UpdateSince(start)
+
 	var preaggnodes = make(map[common.Hash]map[string]map[string]*trienode.Node)
 	for owner, subset := range nodes {
 		current, exist := preaggnodes[owner]
@@ -466,6 +469,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	// load the aggNode from clean memory cache and update it, then persist it.
 	var group sync.WaitGroup
 	asyncAggNodes := make(map[common.Hash]*sync.Map)
+	concurrentCh := make(chan bool, 100)
 
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
@@ -481,13 +485,16 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					tmp = &sync.Map{}
 					asyncAggNodes[owner] = tmp
 				}
+				concurrentCh <- true
 				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
+					startTime := time.Now()
 					var blob []byte
 					if owner == (common.Hash{}) {
 						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
 					} else {
 						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
 					}
+					defer perfCacheAggnodeMissTimer.UpdateSince(startTime)
 					blob, err := UpdateToBlob(blob, cs)
 					if err != nil {
 						log.Crit("Update to blob failed", "error", err)
@@ -501,6 +508,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 						}
 					}
 					group.Done()
+					<-concurrentCh
 				}(cache.db, common.BytesToHash(owner.Bytes()), common.CopyBytes([]byte(aggPath)), preaggnodes[owner][aggPath])
 			} else {
 				var blob []byte
