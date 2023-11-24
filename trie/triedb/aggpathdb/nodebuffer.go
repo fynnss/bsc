@@ -133,10 +133,10 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 		}
 	}
 
-	if a.current.size < a.current.limit {
-		log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
-		return nil
-	}
+	//if a.current.size < a.current.limit {
+	//	log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
+	//	return nil
+	//}
 
 	// background flush doing
 	if atomic.LoadUint64(&a.background.immutable) == 1 {
@@ -311,7 +311,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, cleans *aggNodeCache, id uint
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "origin_bytes", common.StorageSize(nc.size), "batch_bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
@@ -469,7 +469,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	// load the aggNode from clean memory cache and update it, then persist it.
 	var group sync.WaitGroup
 	asyncAggNodes := make(map[common.Hash]*sync.Map)
-	concurrentCh := make(chan bool, 100)
+	concurrentCh := make(chan bool, 5)
 
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {

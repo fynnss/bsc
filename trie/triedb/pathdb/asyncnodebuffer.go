@@ -115,13 +115,6 @@ func (a *asyncnodebuffer) empty() bool {
 	return a.current.empty() && a.background.empty()
 }
 
-// setSize sets the buffer size to the provided number, and invokes a flush
-// operation if the current memory usage exceeds the new limit.
-//func (b *nodebuffer) setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
-//	b.limit = uint64(size)
-//	return b.flush(db, clean, id, false)
-//}
-
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
 func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64, force bool) error {
@@ -140,6 +133,7 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		}
 	}
 
+	// TODO:
 	if a.current.size < a.current.limit {
 		return nil
 	}
@@ -316,7 +310,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, id ui
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Info("Persisted pathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted pathdb nodes", "nodes", len(nc.nodes), "origin_bytes", nc.size, "batch_bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
