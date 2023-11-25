@@ -133,7 +133,6 @@ func (a *asyncnodebuffer) flush(db ethdb.KeyValueStore, clean *fastcache.Cache, 
 		}
 	}
 
-	// TODO:
 	if a.current.size < a.current.limit {
 		return nil
 	}

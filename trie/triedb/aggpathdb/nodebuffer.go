@@ -133,10 +133,10 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 		}
 	}
 
-	//if a.current.size < a.current.limit {
-	//	log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
-	//	return nil
-	//}
+	if a.current.size < a.current.limit {
+		log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
+		return nil
+	}
 
 	// background flush doing
 	if atomic.LoadUint64(&a.background.immutable) == 1 {
