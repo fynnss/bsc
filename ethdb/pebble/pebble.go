@@ -22,7 +22,6 @@ package pebble
 import (
 	"bytes"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -180,7 +179,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 
 		// The default compaction concurrency(1 thread),
 		// Here use all available CPUs for faster compaction.
-		MaxConcurrentCompactions: func() int { return runtime.NumCPU() },
+		MaxConcurrentCompactions: func() int { return 2 },
 
 		// Per-level options. Options for at least one level must be specified. The
 		// options for the last level are used for all subsequent levels.
@@ -191,8 +190,10 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 			WriteStallBegin: db.onWriteStallBegin,
 			WriteStallEnd:   db.onWriteStallEnd,
 		},
-		Logger: panicLogger{}, // TODO(karalabe): Delete when this is upstreamed in Pebble
+		Logger: pebble.DefaultLogger,
 	}
+	opt.Experimental.L0CompactionConcurrency = 2
+	opt.Experimental.MaxWriterConcurrency = 1
 
 	for i := 0; i < len(opt.Levels); i++ {
 		l := &opt.Levels[i]
