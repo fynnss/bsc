@@ -607,12 +607,12 @@ func truncateFromTail(db ethdb.Batcher, freezer *rawdb.ResettableFreezer, ntail 
 	if otail >= ntail {
 		return 0, nil
 	}
+	batch := db.NewBatch()
 	// Load the meta objects in range [otail+1, ntail]
 	blobs, err := rawdb.ReadStateHistoryMetaList(freezer, otail+1, ntail-otail)
 	if err != nil {
 		return 0, err
 	}
-	batch := db.NewBatch()
 	for _, blob := range blobs {
 		var m meta
 		if err := m.decode(blob); err != nil {

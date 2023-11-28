@@ -469,7 +469,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	// load the aggNode from clean memory cache and update it, then persist it.
 	var group sync.WaitGroup
 	asyncAggNodes := make(map[common.Hash]*sync.Map)
-	ch := make(chan struct{}, 10)
+	ch := make(chan struct{}, 3)
 
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
@@ -487,13 +487,13 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 				}
 				ch <- struct{}{}
 				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
-
 					var blob []byte
 					if owner == (common.Hash{}) {
 						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
 					} else {
 						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
 					}
+
 					blob, err := UpdateToBlob(blob, cs)
 					if err != nil {
 						panic(fmt.Sprintf("Update to blob failed, error %v", err))

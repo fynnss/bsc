@@ -175,10 +175,11 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// Store the root->id lookup afterwards. All stored lookups are identified
 	// by the **unique** state root. It's impossible that in the same chain
 	// blocks are not adjacent but have the same root.
+	batch := dl.db.diskdb.NewBatch()
 	if dl.id == 0 {
-		rawdb.WriteStateID(dl.db.diskdb, dl.root, 0)
+		rawdb.WriteStateID(batch, dl.root, 0)
 	}
-	rawdb.WriteStateID(dl.db.diskdb, bottom.rootHash(), bottom.stateID())
+	rawdb.WriteStateID(batch, bottom.rootHash(), bottom.stateID())
 
 	// Construct a new disk layer by merging the nodes from the provided diff
 	// layer, and flush the content in disk layer if there are too many nodes
@@ -195,15 +196,33 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	if err := ndl.buffer.flush(ndl.db.diskdb, ndl.cleans, ndl.id, force); err != nil {
 		return nil, err
 	}
-	// To remove outdated history objects from the end, we set the 'tail' parameter
-	// to 'oldest-1' due to the offset between the freezer index and the history ID.
-	if overflow {
-		pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
+
+	writeBackground := func() {
+		// write state id
+		err := batch.Write()
 		if err != nil {
-			return nil, err
+			log.Error("disklayer batch write failed", "err", err)
+			return
 		}
-		log.Debug("Pruned state history", "items", pruned, "tailid", oldest)
+		batch.Reset()
+		// To remove outdated history objects from the end, we set the 'tail' parameter
+		// to 'oldest-1' due to the offset between the freezer index and the history ID.
+		if overflow {
+			pruned, err := truncateFromTail(ndl.db.diskdb, ndl.db.freezer, oldest-1)
+			if err != nil {
+				log.Error("disklayer truncate from tail failed, err: ", err)
+				return
+			}
+			log.Debug("Pruned state history", "items", pruned, "tailid", oldest)
+		}
 	}
+	if !force {
+		// write background.
+		go writeBackground()
+	} else {
+		writeBackground()
+	}
+
 	diskLayerCommitTimer.UpdateSince(start)
 	return ndl, nil
 }
