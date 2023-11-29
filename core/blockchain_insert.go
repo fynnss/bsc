@@ -63,7 +63,7 @@ func (st *insertStats) report(chain []*types.Block, index int, trieDiffNodes, tr
 		if timestamp := time.Unix(int64(end.Time()), 0); time.Since(timestamp) > time.Minute {
 			context = append(context, []interface{}{"age", common.PrettyAge(timestamp)}...)
 		}
-		if trieDiffNodes != 0 { // pathdb
+		if trieDiffNodes != 0 { // path or agg path
 			context = append(context, []interface{}{"triediffs", trieDiffNodes}...)
 			context = append(context, []interface{}{"triedirty", trieBufNodes}...)
 			context = append(context, []interface{}{"trieimutabledirty", trieImmutableBufNodes}...)

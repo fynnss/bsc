@@ -1597,7 +1597,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		bc.commitLock.Lock()
 		defer bc.commitLock.Unlock()
 
-		// If node is running in path mode, skip explicit gc operation
+		// If node is running in path or agg path mode, skip explicit gc operation
 		// which is unnecessary in this mode.
 		if bc.triedb.Scheme() == rawdb.PathScheme || bc.triedb.Scheme() == rawdb.AggPathScheme {
 			return nil

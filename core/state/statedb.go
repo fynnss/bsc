@@ -49,6 +49,13 @@ const (
 	storageDeleteLimit = 512 * 1024 * 1024
 )
 
+var (
+	// for perf performance
+	getStateObjectTimer        = metrics.NewRegisteredTimer("get/state/object/time", nil)
+	intermediateRootTimer      = metrics.NewRegisteredTimer("intermediate/root/time", nil)
+	stateIntermediateRootTimer = metrics.NewRegisteredTimer("state/intermediate/root/time", nil)
+)
+
 type revision struct {
 	id           int
 	journalIndex int
@@ -745,6 +752,8 @@ func (s *StateDB) deleteStateObject(obj *stateObject) {
 // the object is not found or was deleted in this execution context. If you need
 // to differentiate between non-existent/just-deleted, use getDeletedStateObject.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
+	start := time.Now()
+	defer getStateObjectTimer.UpdateSince(start)
 	if obj := s.getDeletedStateObject(addr); obj != nil && !obj.deleted {
 		return obj
 	}
@@ -1154,6 +1163,8 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
 func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
+	start := time.Now()
+	defer intermediateRootTimer.UpdateSince(start)
 	// Finalise all the dirty storage states and write them into the tries
 	s.Finalise(deleteEmptyObjects)
 	s.AccountsIntermediateRoot()
@@ -1275,6 +1286,9 @@ func (s *StateDB) AccountsIntermediateRoot() {
 }
 
 func (s *StateDB) StateIntermediateRoot() common.Hash {
+	start := time.Now()
+	defer stateIntermediateRootTimer.UpdateSince(start)
+
 	// If there was a trie prefetcher operating, it gets aborted and irrevocably
 	// modified after we start retrieving tries. Remove it from the statedb after
 	// this round of use.
@@ -1831,20 +1845,7 @@ func (s *StateDB) Commit(block uint64, failPostCommitFunc func(), postCommitFunc
 	if root == (common.Hash{}) {
 		root = types.EmptyRootHash
 	}
-	//origin := s.originalRoot
-	//if origin == (common.Hash{}) {
-	//	origin = types.EmptyRootHash
-	//}
-	//if root != origin {
-	//	start := time.Now()
-	//	if err := s.db.TrieDB().Update(root, origin, block, nodes, triestate.New(s.accountsOrigin, s.storagesOrigin, incomplete)); err != nil {
-	//		return common.Hash{}, nil, err
-	//	}
-	//	s.originalRoot = root
-	//	if metrics.EnabledExpensive {
-	//		s.TrieDBCommits += time.Since(start)
-	//	}
-	//}
+
 	// Clear all internal flags at the end of commit operation.
 	s.accounts = make(map[common.Hash][]byte)
 	s.storages = make(map[common.Hash]map[common.Hash][]byte)
