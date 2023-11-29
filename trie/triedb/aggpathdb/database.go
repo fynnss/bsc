@@ -44,7 +44,7 @@ const (
 	// Too large nodebuffer will cause the system to pause for a long
 	// time when write happens. Also, the largest batch that pebble can
 	// support is 4GB, node will panic if batch size exceeds this limit.
-	MaxDirtyBufferSize = 8 * 1024 * 1024
+	MaxDirtyBufferSize = 256 * 1024 * 1024
 
 	// DefaultDirtyBufferSize is the default memory allowance of node buffer
 	// that aggregates the writes from above until it's flushed into the
@@ -59,7 +59,7 @@ const (
 
 	// DefaultBatchRedundancyRate defines the batch size, compatible write
 	// size calculation is inaccurate
-	DefaultBatchRedundancyRate = 5
+	DefaultBatchRedundancyRate = 6
 )
 
 // layer is the interface implemented by all state layers which includes some
