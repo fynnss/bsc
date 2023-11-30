@@ -46,6 +46,9 @@ func (a *nodebuffer) node(owner common.Hash, path []byte, hash common.Hash) (*tr
 	a.mux.RLock()
 	defer a.mux.RUnlock()
 
+	start := time.Now()
+	defer dirtyBufferQueryTimer.UpdateSince(start)
+
 	node, err := a.current.node(owner, path, hash)
 	if err != nil {
 		return nil, err
@@ -112,13 +115,6 @@ func (a *nodebuffer) empty() bool {
 	return a.current.empty() && a.background.empty()
 }
 
-// setSize sets the buffer size to the provided number, and invokes a flush
-// operation if the current memory usage exceeds the new limit.
-//func (b *nodebuffer) setSize(size int, db ethdb.KeyValueStore, clean *fastcache.Cache, id uint64) error {
-//	b.limit = uint64(size)
-//	return b.flush(db, clean, id, false)
-//}
-
 // flush persists the in-memory dirty trie node into the disk if the configured
 // memory threshold is reached. Note, all data must be written atomically.
 func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint64, force bool) error {
@@ -138,11 +134,13 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 	}
 
 	if a.current.size < a.current.limit {
+		log.Info("Skip flush due to current buffer size is not reach to limit", "current_size", a.current.size, "buffer_limit", a.current.limit)
 		return nil
 	}
 
 	// background flush doing
 	if atomic.LoadUint64(&a.background.immutable) == 1 {
+		log.Info("Skip flush due to background buffer is flushing", "background_size", a.background.size)
 		return nil
 	}
 
@@ -153,11 +151,10 @@ func (a *nodebuffer) flush(db ethdb.KeyValueStore, clean *aggNodeCache, id uint6
 		for {
 			err := a.background.flush(db, clean, persistId)
 			if err == nil {
-				log.Debug("succeed to flush background nodecahce to disk", "state_id", persistId)
+				log.Debug("Succeed to flush background node buffer to disk", "state_id", persistId)
 				return
 			}
-			log.Error("failed to flush background nodecahce to disk", "state_id", persistId, "error", err)
-			panic(fmt.Sprintf("failed to flush background node cache to disk. error %v", err))
+			log.Crit("Failed to flush background node buffer to disk", "state_id", persistId, "error", err)
 		}
 	}(id)
 	return nil
@@ -243,14 +240,14 @@ func (nc *nodecache) commit(nodes map[common.Hash]map[string]*trienode.Node) err
 			current = make(map[string]*trienode.Node)
 			for path, n := range subset {
 				current[path] = n
-				delta += int64(len(n.Blob) + len(path))
+				delta += int64(len(n.Blob) + len(path) + len(owner))
 			}
 			nc.nodes[owner] = current
 			continue
 		}
 		for path, n := range subset {
 			if orig, exist := current[path]; !exist {
-				delta += int64(len(n.Blob) + len(path))
+				delta += int64(len(n.Blob) + len(path) + len(owner))
 			} else {
 				delta += int64(len(n.Blob) - len(orig.Blob))
 				overwrite++
@@ -314,7 +311,7 @@ func (nc *nodecache) flush(db ethdb.KeyValueStore, cleans *aggNodeCache, id uint
 	commitBytesMeter.Mark(int64(size))
 	commitNodesMeter.Mark(int64(nodes))
 	commitTimeTimer.UpdateSince(start)
-	log.Debug("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggpathdb nodes", "nodes", len(nc.nodes), "origin_bytes", common.StorageSize(nc.size), "batch_bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	nc.reset()
 	return nil
 }
@@ -447,6 +444,9 @@ func copyNodeCache(n *nodecache) *nodecache {
 // aggregateAndWriteAggNodes will persist all agg node into the database
 // Note this function will inject all the clean node into the cleanCache
 func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[string]*trienode.Node, cache *aggNodeCache) (total int) {
+	start := time.Now()
+	defer perfAggregateWriteTimer.UpdateSince(start)
+
 	var preaggnodes = make(map[common.Hash]map[string]map[string]*trienode.Node)
 	for owner, subset := range nodes {
 		current, exist := preaggnodes[owner]
@@ -469,6 +469,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	// load the aggNode from clean memory cache and update it, then persist it.
 	var group sync.WaitGroup
 	asyncAggNodes := make(map[common.Hash]*sync.Map)
+	concurrentCh := make(chan struct{}, 3)
 
 	for owner, subset := range preaggnodes {
 		for aggPath, cs := range subset {
@@ -484,16 +485,19 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 					tmp = &sync.Map{}
 					asyncAggNodes[owner] = tmp
 				}
+				concurrentCh <- struct{}{}
 				go func(db *Database, owner common.Hash, aggPath []byte, cs map[string]*trienode.Node) {
+					startTime := time.Now()
 					var blob []byte
 					if owner == (common.Hash{}) {
 						blob = rawdb.ReadAccountTrieAggNode(db.diskdb, aggPath)
 					} else {
 						blob = rawdb.ReadStorageTrieAggNode(db.diskdb, owner, aggPath)
 					}
+					perfCacheAggnodeMissTimer.UpdateSince(startTime)
 					blob, err := UpdateToBlob(blob, cs)
 					if err != nil {
-						panic(fmt.Sprintf("Update to blob failed, error %v", err))
+						log.Crit("Update to blob failed", "error", err)
 					}
 					tmp.Store(string(aggPath), blob)
 					if cache.cleans != nil {
@@ -504,12 +508,13 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 						}
 					}
 					group.Done()
+					<-concurrentCh
 				}(cache.db, common.BytesToHash(owner.Bytes()), common.CopyBytes([]byte(aggPath)), preaggnodes[owner][aggPath])
 			} else {
 				var blob []byte
 				blob, err := UpdateToBlob(aggNode, cs)
 				if err != nil {
-					panic(fmt.Sprintf("Update to blob failed, error %v", err))
+					log.Crit("Update to blob failed", "error", err)
 				}
 				total++
 				if blob == nil {
@@ -529,6 +534,7 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 	group.Wait()
 	for owner, m := range asyncAggNodes {
 		m.Range(func(key, value interface{}) bool {
+			total++
 			aggPath := []byte(key.(string))
 			if value == nil {
 				deleteAggNode(batch, owner, aggPath)

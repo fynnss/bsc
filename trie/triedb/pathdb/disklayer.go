@@ -102,6 +102,7 @@ func newDiskLayer(root common.Hash, id uint64, db *Database, cleans *fastcache.C
 	// the original disk layer).
 	if cleans == nil && db.config.CleanCacheSize != 0 {
 		cleans = fastcache.New(db.config.CleanCacheSize)
+		log.Info("Allocated path cache", "size", db.config.CleanCacheSize)
 	}
 	return &diskLayer{
 		root:   root,

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
@@ -131,7 +132,7 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 		}
 		blob, rest, err = decodeRawNode(rest)
 		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
+			return fmt.Errorf("decode raw node failed in AggNode: %v", err)
 		}
 		n.nodes[string(key)] = blob
 		if len(rest) == 0 {
@@ -192,6 +193,9 @@ func AggNodeString(blob []byte) string {
 }
 
 func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
+	start := time.Now()
+	defer perfReadFromBlobTimer.UpdateSince(start)
+
 	if len(blob) == 0 {
 		return nil, common.Hash{}, io.ErrUnexpectedEOF
 	}
@@ -232,6 +236,9 @@ func ReadFromBlob(path []byte, blob []byte) ([]byte, common.Hash, error) {
 }
 
 func UpdateToBlob(blob []byte, nodes map[string]*trienode.Node) ([]byte, error) {
+	start := time.Now()
+	defer perfUpdateToBlobTimer.UpdateSince(start)
+
 	// init rlp encoder
 	w := rlp.NewEncoderBuffer(nil)
 	offset := w.List()
@@ -344,9 +351,9 @@ func writeAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte, ag
 
 func deleteAggNode(db ethdb.KeyValueWriter, owner common.Hash, aggPath []byte) {
 	if owner == (common.Hash{}) {
-		rawdb.DeleteAccountTrieNode(db, aggPath)
+		rawdb.DeleteAccountTrieAggNode(db, aggPath)
 	} else {
-		rawdb.DeleteStorageTrieNode(db, owner, aggPath)
+		rawdb.DeleteStorageTrieAggNode(db, owner, aggPath)
 	}
 }
 

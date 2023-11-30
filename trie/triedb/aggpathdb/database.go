@@ -52,13 +52,14 @@ const (
 	// Do not increase the buffer size arbitrarily, otherwise the system
 	// pause time will increase when the database writes happen.
 	DefaultDirtyBufferSize = 64 * 1024 * 1024
+
 	// DefaultBackgroundFlushInterval defines the default the wait interval
 	// that background node cache flush disk.
 	DefaultBackgroundFlushInterval = 3
 
 	// DefaultBatchRedundancyRate defines the batch size, compatible write
 	// size calculation is inaccurate
-	DefaultBatchRedundancyRate = 2.5
+	DefaultBatchRedundancyRate = 6
 )
 
 // layer is the interface implemented by all state layers which includes some
