@@ -527,6 +527,13 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 						cache.cleans.Set(cacheKey(owner, []byte(aggPath)), blob)
 					}
 				}
+				if batch.ValueSize() > 256*1024*1024 {
+					err := batch.Write()
+					if err != nil {
+						panic(fmt.Sprintf("batch write failed, error: %v", err))
+					}
+					batch.Reset()
+				}
 			}
 		}
 	}
@@ -539,6 +546,13 @@ func aggregateAndWriteAggNodes(batch ethdb.Batch, nodes map[common.Hash]map[stri
 			} else {
 				blob := value.([]byte)
 				writeAggNode(batch, owner, aggPath, blob)
+			}
+			if batch.ValueSize() > 256*1024*1024 {
+				err := batch.Write()
+				if err != nil {
+					panic(fmt.Sprintf("batch write failed, error: %v", err))
+				}
+				batch.Reset()
 			}
 			return true
 		})

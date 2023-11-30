@@ -174,7 +174,7 @@ func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*St
 	if err != nil {
 		return nil, err
 	}
-	statedb.storagePool = NewStoragePool()
+	// statedb.storagePool = NewStoragePool()
 	return statedb, nil
 }
 
@@ -756,6 +756,8 @@ func (s *StateDB) getStateObject(addr common.Address) *stateObject {
 // flag set. This is needed by the state journal to revert to the correct s-
 // destructed object instead of wiping all knowledge about the state object.
 func (s *StateDB) getDeletedStateObject(addr common.Address) *stateObject {
+	start := time.Now()
+	defer snapGetDeletedStateObjectTimer.UpdateSince(start)
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
 		return obj
