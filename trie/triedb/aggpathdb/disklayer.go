@@ -325,56 +325,59 @@ func (dl *diskLayer) commitNodes(nodes map[common.Hash]map[string]*trienode.Node
 		}
 	}()
 	for owner, aggSubset := range aggTrie {
-		o := owner
+		//o := owner
 		for aPath, trieNodesSet := range aggSubset {
-			ap := aPath
-			trieSet := trieNodesSet
-			go func(account common.Hash, aggPath string, trieNodes map[string]*trienode.Node) {
-				subRes := &subTree{owner: account, aggPath: aggPath, aggNode: nil}
-				mx.RLock()
-				aggNode := dl.buffer.aggNode(owner, []byte(aggPath))
-				mx.RUnlock()
-				exit := true
-				if aggNode == nil {
-					exit = false
-					var err error
-					immutableAggNode := dl.immutableBuffer.aggNode(owner, []byte(aggPath))
-					if immutableAggNode == nil {
-						aggNode, err = dl.cleans.aggNode(owner, []byte(aggPath))
-						if err != nil {
-							panic(fmt.Sprintf("decode agg node failed from clean cache, err: %v", err))
-						}
-						if aggNode == nil {
-							aggNode = &AggNode{}
-						}
-					} else {
-						aggNode, err = immutableAggNode.copy()
-						if err != nil {
-							panic(fmt.Sprintf("decode agg node failed from immutable buffer, err: %v", err))
-						}
+			//ap := aPath
+			//trieSet := trieNodesSet
+			account := owner
+			aggPath := aPath
+			trieNodes := trieNodesSet
+			//go func(account common.Hash, aggPath string, trieNodes map[string]*trienode.Node) {
+			subRes := &subTree{owner: account, aggPath: aggPath, aggNode: nil}
+			mx.RLock()
+			aggNode := dl.buffer.aggNode(owner, []byte(aggPath))
+			mx.RUnlock()
+			exit := true
+			if aggNode == nil {
+				exit = false
+				var err error
+				immutableAggNode := dl.immutableBuffer.aggNode(owner, []byte(aggPath))
+				if immutableAggNode == nil {
+					aggNode, err = dl.cleans.aggNode(owner, []byte(aggPath))
+					if err != nil {
+						panic(fmt.Sprintf("decode agg node failed from clean cache, err: %v", err))
 					}
-					subRes.aggNode = aggNode
-				}
-				pathSize := 0
-				oldSize := aggNode.Size()
-				for path, n := range trieNodes {
-					pathSize += len(path)
-					if n.IsDeleted() {
-						aggNode.Delete([]byte(path))
-					} else {
-						aggNode.Update([]byte(path), n)
+					if aggNode == nil {
+						aggNode = &AggNode{}
 					}
-				}
-				newSize := aggNode.Size()
-				if exit {
-					subRes.overwrite++
-					subRes.overwriteSize += int64(newSize - oldSize + pathSize + len(owner))
-					subRes.delta += int64(newSize - oldSize)
 				} else {
-					subRes.delta += int64(newSize + pathSize + len(owner))
+					aggNode, err = immutableAggNode.copy()
+					if err != nil {
+						panic(fmt.Sprintf("decode agg node failed from immutable buffer, err: %v", err))
+					}
 				}
-				mergeSubResCh <- subRes
-			}(o, ap, trieSet)
+				subRes.aggNode = aggNode
+			}
+			pathSize := 0
+			oldSize := aggNode.Size()
+			for path, n := range trieNodes {
+				pathSize += len(path)
+				if n.IsDeleted() {
+					aggNode.Delete([]byte(path))
+				} else {
+					aggNode.Update([]byte(path), n)
+				}
+			}
+			newSize := aggNode.Size()
+			if exit {
+				subRes.overwrite++
+				subRes.overwriteSize += int64(newSize - oldSize + pathSize + len(owner))
+				subRes.delta += int64(newSize - oldSize)
+			} else {
+				subRes.delta += int64(newSize + pathSize + len(owner))
+			}
+			mergeSubResCh <- subRes
+			//}(o, ap, trieSet)
 		}
 	}
 	wg.Wait()
