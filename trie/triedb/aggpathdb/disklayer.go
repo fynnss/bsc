@@ -304,7 +304,7 @@ func (dl *diskLayer) commitNodes(nodes map[common.Hash]map[string]*trienode.Node
 					}
 					// if immutable buffer and cache missing, create a new aggNode
 					if aggNode == nil {
-						aggNode = &AggNode{}
+						aggNode = &AggNode{nodes: make(map[string]*trienode.Node)}
 					}
 				} else {
 					aggNode, err = immutableAggNode.copy()

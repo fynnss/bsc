@@ -66,6 +66,9 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	} else {
 		nBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
 	}
+	if nBlob == nil {
+		return nil, nil
+	}
 	aggNode, err := DecodeAggNode(nBlob)
 	if err != nil {
 		return nil, fmt.Errorf("decode node failed. error: %v", err)
