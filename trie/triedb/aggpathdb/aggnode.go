@@ -14,13 +14,13 @@ import (
 
 // AggNode is a basic structure for aggregate and store two layer trie node.
 type AggNode struct {
-	//root    *trienode.Node
-	//childes [16]*trienode.Node
-	nodes map[string]*trienode.Node
+	root    *trienode.Node
+	childes [16]*trienode.Node
+	//nodes map[string]*trienode.Node
 }
 
 func DecodeAggNode(data []byte) (*AggNode, error) {
-	aggNode := &AggNode{nodes: make(map[string]*trienode.Node)}
+	aggNode := &AggNode{}
 	if len(data) != 0 {
 		err := aggNode.decodeFrom(data)
 		if err != nil {
@@ -49,19 +49,14 @@ func (n *AggNode) Empty() bool {
 }
 
 func (n *AggNode) Size() int {
-	//size := 0
-	//if n.root != nil {
-	//	size += len(n.root.Blob)
-	//}
-	//for _, c := range n.childes {
-	//	if c != nil {
-	//		size += len(c.Blob)
-	//	}
-	//}
-	//return size
 	size := 0
-	for k, node := range n.nodes {
-		size += len(k) + len(node.Blob)
+	if n.root != nil {
+		size += len(n.root.Blob)
+	}
+	for _, c := range n.childes {
+		if c != nil {
+			size += len(c.Blob)
+		}
 	}
 	return size
 }
@@ -75,165 +70,94 @@ func index(path []byte) string {
 }
 
 func (n *AggNode) Update(path []byte, node *trienode.Node) {
-	//if len(path)%2 == 0 {
-	//	n.root = node
-	//} else {
-	//	i := path[len(path)-1]
-	//	n.childes[int(i)] = node
-	//}
-	n.nodes[index(path)] = node
+	if len(path)%2 == 0 {
+		n.root = node
+	} else {
+		i := path[len(path)-1]
+		n.childes[int(i)] = node
+	}
 }
 
 func (n *AggNode) Delete(path []byte) {
-	//if len(path)%2 == 0 {
-	//	n.root = nil
-	//} else {
-	//	i := path[len(path)-1]
-	//	n.childes[int(i)] = nil
-	//}
-	key := index(path)
-	_, ok := n.nodes[key]
-	if ok {
-		delete(n.nodes, key)
+	if len(path)%2 == 0 {
+		n.root = nil
+	} else {
+		i := path[len(path)-1]
+		n.childes[int(i)] = nil
 	}
 }
 
 func (n *AggNode) Has(path []byte) bool {
-	//if len(path)%2 == 0 {
-	//	return n.root == nil
-	//} else {
-	//	i := path[len(path)-1]
-	//	return n.childes[int(i)] == nil
-	//}
-	_, ok := n.nodes[index(path)]
-	return ok
+	if len(path)%2 == 0 {
+		return n.root == nil
+	} else {
+		i := path[len(path)-1]
+		return n.childes[int(i)] == nil
+	}
 }
 
 func (n *AggNode) Node(path []byte) *trienode.Node {
-	//var tn *trienode.Node
-	//if len(path)%2 == 0 {
-	//	tn = n.root
-	//} else {
-	//	i := path[len(path)-1]
-	//	tn = n.childes[int(i)]
-	//}
-	//if tn.Hash == (common.Hash{}) && len(tn.Blob) != 0 {
-	//	h := newHasher()
-	//	defer h.release()
-	//	tn.Hash = h.hash(tn.Blob)
-	//}
-	//return tn
-	node, _ := n.nodes[index(path)]
-	if node.Hash == (common.Hash{}) && len(node.Blob) != 0 {
+	var tn *trienode.Node
+	if len(path)%2 == 0 {
+		tn = n.root
+	} else {
+		i := path[len(path)-1]
+		tn = n.childes[int(i)]
+	}
+	if tn.Hash == (common.Hash{}) && len(tn.Blob) != 0 {
 		h := newHasher()
 		defer h.release()
-		node.Hash = h.hash(node.Blob)
+		tn.Hash = h.hash(tn.Blob)
 	}
-	return node
+	return tn
 }
 
 func (n *AggNode) decodeFrom(buf []byte) error {
-	//if len(buf) == 0 {
-	//	return io.ErrUnexpectedEOF
-	//}
-	//
-	//elems, _, err := rlp.SplitList(buf)
-	//if err != nil {
-	//	return fmt.Errorf("decode error: %v", err)
-	//}
-	//
-	//if c, _ := rlp.CountValues(elems); c != 17 {
-	//	return fmt.Errorf("invalid number of list elements: %v", c)
-	//}
-	//
-	//var rest []byte
-	//n.root, rest, err = decodeRawNode(elems)
-	//if err != nil {
-	//	return fmt.Errorf("decode root Node failed in AggNode: %v", err)
-	//}
-	//
-	//for i := 0; i < 16; i++ {
-	//	var cn *trienode.Node
-	//	cn, rest, err = decodeRawNode(rest)
-	//	if err != nil {
-	//		return fmt.Errorf("decode childes Node(%d) failed in AggNode: %v", i, err)
-	//	}
-	//	n.childes[i] = cn
-	//}
-	//return nil
 	if len(buf) == 0 {
 		return io.ErrUnexpectedEOF
 	}
 
-	rest, _, err := rlp.SplitList(buf)
+	elems, _, err := rlp.SplitList(buf)
 	if err != nil {
 		return fmt.Errorf("decode error: %v", err)
 	}
-	if len(rest) == 0 {
-		return nil
+
+	if c, _ := rlp.CountValues(elems); c != 17 {
+		return fmt.Errorf("invalid number of list elements: %v", c)
 	}
 
-	for {
-		var (
-			key  []byte
-			node *trienode.Node
-		)
-		key, rest, err = decodeKey(rest)
+	var rest []byte
+	n.root, rest, err = decodeRawNode(elems)
+	if err != nil {
+		return fmt.Errorf("decode root Node failed in AggNode: %v", err)
+	}
+
+	for i := 0; i < 16; i++ {
+		var cn *trienode.Node
+		cn, rest, err = decodeRawNode(rest)
 		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
+			return fmt.Errorf("decode childes Node(%d) failed in AggNode: %v", i, err)
 		}
-		node, rest, err = decodeRawNode(rest)
-		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
-		}
-		n.nodes[string(key)] = node
-		if len(rest) == 0 {
-			break
-		}
+		n.childes[i] = cn
 	}
 	return nil
 }
 
-func decodeKey(buf []byte) ([]byte, []byte, error) {
-	kind, val, rest, err := rlp.Split(buf)
-	if err != nil {
-		return nil, buf, err
-	}
-
-	if kind == rlp.String && len(val) == 0 {
-		return nil, rest, nil
-	}
-
-	// Hashes are not calculated here to avoid unnecessary overhead
-	return val, rest, nil
-}
-
 func (n *AggNode) encodeTo() []byte {
-	//w := rlp.NewEncoderBuffer(nil)
-	//offset := w.List()
-	//
-	//if n.root != nil {
-	//	writeRawNode(w, n.root.Blob)
-	//} else {
-	//	writeRawNode(w, nil)
-	//}
-	//for _, c := range n.childes {
-	//	if c != nil {
-	//		writeRawNode(w, c.Blob)
-	//	} else {
-	//		writeRawNode(w, nil)
-	//	}
-	//}
-	//w.ListEnd(offset)
-	//result := w.ToBytes()
-	//w.Flush()
-	//return result
 	w := rlp.NewEncoderBuffer(nil)
 	offset := w.List()
 
-	for k, node := range n.nodes {
-		writeRawNode(w, []byte(k))
-		writeRawNode(w, node.Blob)
+	if n.root != nil {
+		writeRawNode(w, n.root.Blob)
+	} else {
+		writeRawNode(w, nil)
+	}
+	for _, c := range n.childes {
+		if c != nil {
+			writeRawNode(w, c.Blob)
+		} else {
+			writeRawNode(w, nil)
+		}
 	}
 	w.ListEnd(offset)
 	result := w.ToBytes()
