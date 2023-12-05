@@ -266,12 +266,13 @@ func (dl *diskLayer) journal(w io.Writer) error {
 	for key, an := range dl.buffer.aggNodes {
 		owner, aggpath := parseCacheKey([]byte(key))
 		entry := journalNodes{Owner: owner}
-		if an.root != nil {
-			entry.Nodes = append(entry.Nodes, journalNode{Path: aggpath, Blob: an.root.Blob})
-		}
-		for i, n := range an.childes {
+		for i, n := range an.nodes {
 			if n != nil {
-				entry.Nodes = append(entry.Nodes, journalNode{Path: append(aggpath, byte(i)), Blob: n.Blob})
+				if i == 0 {
+					entry.Nodes = append(entry.Nodes, journalNode{Path: aggpath, Blob: n.Blob})
+				} else {
+					entry.Nodes = append(entry.Nodes, journalNode{Path: append(aggpath, byte(i-1)), Blob: n.Blob})
+				}
 			}
 		}
 		nodes = append(nodes, entry)
@@ -280,12 +281,13 @@ func (dl *diskLayer) journal(w io.Writer) error {
 		for key, an := range dl.immutableBuffer.aggNodes {
 			owner, aggpath := parseCacheKey([]byte(key))
 			entry := journalNodes{Owner: owner}
-			if an.root != nil {
-				entry.Nodes = append(entry.Nodes, journalNode{Path: aggpath, Blob: an.root.Blob})
-			}
-			for i, n := range an.childes {
+			for i, n := range an.nodes {
 				if n != nil {
-					entry.Nodes = append(entry.Nodes, journalNode{Path: append(aggpath, byte(i)), Blob: n.Blob})
+					if i == 0 {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: aggpath, Blob: n.Blob})
+					} else {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: append(aggpath, byte(i-1)), Blob: n.Blob})
+					}
 				}
 			}
 			nodes = append(nodes, entry)
