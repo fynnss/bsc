@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -153,6 +154,9 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
+	var start = time.Now()
+	defer diskLayerNodeTimer.UpdateSince(start)
+
 	if dl.stale {
 		return nil, errSnapshotStale
 	}
@@ -194,11 +198,13 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 		nBlob []byte
 		nHash common.Hash
 	)
+	startTmp := time.Now()
 	if owner == (common.Hash{}) {
 		nBlob, nHash = rawdb.ReadAccountTrieNode(dl.db.diskdb, path)
 	} else {
 		nBlob, nHash = rawdb.ReadStorageTrieNode(dl.db.diskdb, owner, path)
 	}
+	diskLayerRawNodeTimer.UpdateSince(startTmp)
 	if nHash != hash {
 		diskFalseMeter.Mark(1)
 		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
@@ -223,6 +229,9 @@ func (dl *diskLayer) update(root common.Hash, id uint64, block uint64, nodes map
 func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
+
+	start := time.Now()
+	defer commitTimeTimer.UpdateSince(start)
 
 	// Construct and store the state history first. If crash happens after storing
 	// the state history but without flushing the corresponding states(journal),
