@@ -2,6 +2,7 @@ package aggpathdb
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/VictoriaMetrics/fastcache"
 	"github.com/ethereum/go-ethereum/common"
@@ -60,12 +61,14 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 		nHash common.Hash
 	)
 
+	start := time.Now()
 	// try to get node from the database
 	if owner == (common.Hash{}) {
 		nBlob = rawdb.ReadAccountTrieAggNode(c.db.diskdb, aggPath)
 	} else {
 		nBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
 	}
+	diskLayerRawNodeTimer.UpdateSince(start)
 	if nBlob == nil {
 		// not found
 		return []byte{}, nil

@@ -48,4 +48,9 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("pathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("pathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("pathdb/history/bytes/index", nil)
+
+	// perf
+	diskLayerNodeTimer       = metrics.NewRegisteredTimer("pathdb/disk/node/time", nil)
+	diskLayerRawNodeTimer    = metrics.NewRegisteredTimer("pathdb/disk/rawnode/time", nil)
+	historyTruncateTimeMeter = metrics.NewRegisteredTimer("pathdb/history/truncate/time", nil)
 )
