@@ -450,6 +450,7 @@ func (dl *diskLayer) commitNodesV2(nodes map[common.Hash]map[string]*trienode.No
 
 func (dl *diskLayer) commitNodes(nodes map[common.Hash]map[string]*trienode.Node) {
 	start := time.Now()
+	defer perfCommitNodesTimer.UpdateSince(start)
 	// owner -> aggPath -> path -> trienode
 	aggTrie := make(map[common.Hash]map[string]map[string]*trienode.Node)
 	for owner, subset := range nodes {

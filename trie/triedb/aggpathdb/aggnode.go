@@ -122,7 +122,7 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 		}
 		node, rest, err = decodeRawNode(rest)
 		if err != nil {
-			return fmt.Errorf("decode node key failed in AggNode: %v", err)
+			return fmt.Errorf("decode node value failed in AggNode: %v", err)
 		}
 		if len(key) == 0 {
 			n.nodes[0] = node
@@ -137,7 +137,6 @@ func (n *AggNode) decodeFrom(buf []byte) error {
 		}
 	}
 	return nil
-
 }
 
 func decodeKey(buf []byte) ([]byte, []byte, error) {
