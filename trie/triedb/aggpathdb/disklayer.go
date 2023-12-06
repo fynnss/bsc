@@ -123,6 +123,8 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 
 	n, err = dl.immutableBuffer.node(owner, path, hash)
 	if err != nil {
+		dirtyHitMeter.Mark(1)
+		dirtyReadMeter.Mark(int64(len(n.Blob)))
 		return nil, err
 	}
 
@@ -151,6 +153,9 @@ func (dl *diskLayer) update(root common.Hash, id uint64, block uint64, nodes map
 func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	dl.lock.Lock()
 	defer dl.lock.Unlock()
+
+	start := time.Now()
+	defer commitTimeTimer.UpdateSince(start)
 
 	// Construct and store the state history first. If crash happens
 	// after storing the state history but without flushing the

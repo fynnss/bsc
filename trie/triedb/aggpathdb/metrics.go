@@ -34,9 +34,11 @@ var (
 	dirtyFalseMeter = metrics.NewRegisteredMeter("aggpathdb/dirty/false", nil)
 	diskFalseMeter  = metrics.NewRegisteredMeter("aggpathdb/disk/false", nil)
 
-	commitTimeTimer  = metrics.NewRegisteredTimer("aggpathdb/commit/time", nil)
-	commitNodesMeter = metrics.NewRegisteredMeter("aggpathdb/commit/aggNodes", nil)
-	commitBytesMeter = metrics.NewRegisteredMeter("aggpathdb/commit/bytes", nil)
+	commitTimeTimer = metrics.NewRegisteredTimer("aggpathdb/commit/time", nil)
+
+	flushTimeTimer  = metrics.NewRegisteredTimer("aggpathdb/flush/time", nil)
+	flushNodesMeter = metrics.NewRegisteredMeter("aggpathdb/flush/aggNodes", nil)
+	flushBytesMeter = metrics.NewRegisteredMeter("aggpathdb/flush/bytes", nil)
 
 	gcNodesMeter = metrics.NewRegisteredMeter("aggpathdb/gc/aggNodes", nil)
 	gcBytesMeter = metrics.NewRegisteredMeter("aggpathdb/gc/bytes", nil)
