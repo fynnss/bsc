@@ -70,4 +70,5 @@ var (
 	diskLayerNodeTimer       = metrics.NewRegisteredTimer("aggpathdb/disk/node/time", nil)
 	diskLayerRawNodeTimer    = metrics.NewRegisteredTimer("aggpathdb/disk/rawnode/time", nil)
 	historyTruncateTimeMeter = metrics.NewRegisteredTimer("aggpathdb/history/truncate/time", nil)
+	perfCommitNodesTimer     = metrics.NewRegisteredTimer("aggpathdb/commit/nodes/time", nil)
 )
