@@ -2017,7 +2017,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 		// Enable prefetching to pull in trie node paths while processing transactions
 
 		// TODO: turnoff prefetch trie node for debug
-		// statedb.StartPrefetcher("chain")
+		statedb.StartPrefetcher("chain")
 		interruptCh := make(chan struct{})
 		// For diff sync, it may fallback to full sync, so we still do prefetch
 		if len(block.Transactions()) >= prefetchTxNumber {
@@ -2032,7 +2032,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool) (int, error)
 			// trie prefetcher is thread safe now, ok to prefetch in a separate routine
 
 			// TODO: turnoff prefetch trie node for debug
-			// go throwaway.TriePrefetchInAdvance(block, signer)
+			go throwaway.TriePrefetchInAdvance(block, signer)
 		}
 
 		//Process block using the parent state as reference point

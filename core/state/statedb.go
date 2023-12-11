@@ -175,7 +175,7 @@ type StateDB struct {
 	StorageDeleted int
 }
 
-// NewWithSharedPool creates a new state with sharedStorge on layer 1.5
+// NewWithSharedPool creates a new state with sharedStorage on layer 1.5
 func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) {
 	statedb, err := New(root, db, snaps)
 	if err != nil {
@@ -222,7 +222,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 }
 
 func (s *StateDB) EnableWriteOnSharedStorage() {
-	s.writeOnSharedStorage = true
+	// s.writeOnSharedStorage = true
 }
 
 // In mining mode, we will try multi-fillTransactions to get the most profitable one.
