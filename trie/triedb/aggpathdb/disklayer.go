@@ -171,6 +171,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		oldest   uint64
 	)
 	if dl.db.freezer != nil {
+		// TODO: can async??
 		err := writeHistory(dl.db.freezer, bottom)
 		if err != nil {
 			return nil, err
@@ -206,6 +207,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// truncation) surpasses the persisted state ID, we take the necessary action
 	// of forcibly committing the cached dirty nodes to ensure that the persisted
 	// state ID remains higher.
+	// TODO: persistent state id canbe cached??
 	if !force && rawdb.ReadPersistentStateID(dl.db.diskdb) < oldest {
 		force = true
 	}
@@ -331,6 +333,9 @@ func (dl *diskLayer) revert(h *history, loader triestate.TrieLoader) (*diskLayer
 }
 
 func (dl *diskLayer) commitNodesV2(nodes map[common.Hash]map[string]*trienode.Node) {
+	start := time.Now()
+	defer perfCommitNodesTimer.UpdateSince(start)
+
 	type subTree struct {
 		owner         common.Hash
 		aggPath       string
