@@ -460,6 +460,9 @@ func (d *Database) meter(refresh time.Duration) {
 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
 			level0CompCount    = int64(d.level0Comp.Load())
 		)
+		fmt.Printf("db_metrics=%v, comp_time=%v, write_delay_count=%v, write_delay_time=%v, non_level0_comp_count=%v, level0_comp_cout=%v\n",
+			metrics, compTime, writeDelayCount, writeDelayTime, nonLevel0CompCount, level0CompCount)
+
 		writeDelayTimes[i%2] = writeDelayTime
 		writeDelayCounts[i%2] = writeDelayCount
 		compTimes[i%2] = compTime
