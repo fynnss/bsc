@@ -105,6 +105,9 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	dl.lock.RLock()
 	defer dl.lock.RUnlock()
 
+	var start = time.Now()
+	defer diskLayerNodeTimer.UpdateSince(start)
+
 	if dl.stale {
 		return nil, errSnapshotStale
 	}
@@ -168,6 +171,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 		oldest   uint64
 	)
 	if dl.db.freezer != nil {
+		// TODO: can async??
 		err := writeHistory(dl.db.freezer, bottom)
 		if err != nil {
 			return nil, err
@@ -203,6 +207,7 @@ func (dl *diskLayer) commit(bottom *diffLayer, force bool) (*diskLayer, error) {
 	// truncation) surpasses the persisted state ID, we take the necessary action
 	// of forcibly committing the cached dirty nodes to ensure that the persisted
 	// state ID remains higher.
+	// TODO: persistent state id canbe cached??
 	if !force && rawdb.ReadPersistentStateID(dl.db.diskdb) < oldest {
 		force = true
 	}
@@ -422,6 +427,9 @@ func (dl *diskLayer) commitNodesV3(aggnodes map[common.Hash]map[string]*AggNode)
 }
 
 func (dl *diskLayer) commitNodesV2(nodes map[common.Hash]map[string]*trienode.Node) {
+	start := time.Now()
+	defer perfCommitNodesTimer.UpdateSince(start)
+
 	type subTree struct {
 		owner         common.Hash
 		aggPath       string
@@ -543,6 +551,7 @@ func (dl *diskLayer) commitNodesV2(nodes map[common.Hash]map[string]*trienode.No
 
 func (dl *diskLayer) commitNodes(nodes map[common.Hash]map[string]*trienode.Node) {
 	start := time.Now()
+	defer perfCommitNodesTimer.UpdateSince(start)
 	// owner -> aggPath -> path -> trienode
 	aggTrie := make(map[common.Hash]map[string]map[string]*trienode.Node)
 	for owner, subset := range nodes {

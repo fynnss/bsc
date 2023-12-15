@@ -266,12 +266,13 @@ func (dl *diskLayer) journal(w io.Writer) error {
 	for owner, subset := range dl.buffer.aggNodes {
 		entry := journalNodes{Owner: owner}
 		for path, an := range subset {
-			if an.root != nil {
-				entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: an.root.Blob})
-			}
-			for i, n := range an.childes {
+			for i, n := range an.nodes {
 				if n != nil {
-					entry.Nodes = append(entry.Nodes, journalNode{Path: append([]byte(path), byte(i)), Blob: n.Blob})
+					if i == 0 {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(path), Blob: n.Blob})
+					} else {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: append([]byte(path), byte(i-1)), Blob: n.Blob})
+					}
 				}
 			}
 		}

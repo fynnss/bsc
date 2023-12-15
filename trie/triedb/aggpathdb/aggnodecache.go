@@ -8,7 +8,10 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/log"
+	"golang.org/x/sync/singleflight"
 )
+
+var g singleflight.Group
 
 type aggNodeCache struct {
 	cleans *fastcache.Cache
@@ -56,42 +59,52 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	}
 
 	// Try to retrieve the trie node from the disk.
-	var (
-		nBlob []byte
-		nHash common.Hash
-	)
+	v, err, _ := g.Do(string(key), func() (interface{}, error) {
+		start := time.Now()
+		var originBlob []byte
+		// try to get node from the database
+		if owner == (common.Hash{}) {
+			originBlob = rawdb.ReadAccountTrieAggNode(c.db.diskdb, aggPath)
+		} else {
+			originBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
+		}
+		diskLayerRawNodeTimer.UpdateSince(start)
+		if originBlob == nil {
+			return []byte{}, nil
+		}
+		aggNode, err := DecodeAggNode(originBlob)
+		if err != nil {
+			return nil, fmt.Errorf("decode node failed from diskdb. error: %v", err)
+		}
+		n := aggNode.Node(path)
+		if n == nil {
+			// not found
+			return []byte{}, nil
+		}
 
-	// try to get node from the database
-	if owner == (common.Hash{}) {
-		nBlob = rawdb.ReadAccountTrieAggNode(c.db.diskdb, aggPath)
-	} else {
-		nBlob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
+		if n.Hash != hash {
+			diskFalseMeter.Mark(1)
+			log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", n.Hash)
+			return nil, newUnexpectedNodeError("disk", hash, n.Hash, owner, path, n.Blob)
+		}
+		if c.cleans != nil {
+			c.cleans.Set(key, originBlob)
+			cleanWriteMeter.Mark(int64(len(originBlob)))
+		}
+		return n.Blob, nil
+	})
+	//if shared { // debug
+	//	log.Info("single flight", "owner", owner, "path", path)
+	//}
+	if err != nil {
+		return []byte{}, err
 	}
+	nBlob := v.([]byte)
 	if nBlob == nil {
 		// not found
 		return []byte{}, nil
 	}
-	aggNode, err := DecodeAggNode(nBlob)
-	if err != nil {
-		return nil, fmt.Errorf("decode node failed from diskdb. error: %v", err)
-	}
-	n := aggNode.Node(path)
-	if n == nil {
-		// not found
-		return []byte{}, nil
-	}
-
-	if n.Hash != hash {
-		diskFalseMeter.Mark(1)
-		log.Error("Unexpected trie node in disk", "owner", owner, "path", path, "expect", hash, "got", nHash)
-		return nil, newUnexpectedNodeError("disk", hash, nHash, owner, path, nBlob)
-	}
-	if c.cleans != nil {
-		c.cleans.Set(key, nBlob)
-		cleanWriteMeter.Mark(int64(len(nBlob)))
-	}
-
-	return n.Blob, nil
+	return nBlob, nil
 }
 
 func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, error) {

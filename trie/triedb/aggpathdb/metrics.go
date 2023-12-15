@@ -69,4 +69,10 @@ var (
 	historyBuildTimeMeter  = metrics.NewRegisteredTimer("aggpathdb/history/time", nil)
 	historyDataBytesMeter  = metrics.NewRegisteredMeter("aggpathdb/history/bytes/data", nil)
 	historyIndexBytesMeter = metrics.NewRegisteredMeter("aggpathdb/history/bytes/index", nil)
+
+	// perf
+	diskLayerNodeTimer       = metrics.NewRegisteredTimer("aggpathdb/disk/node/time", nil)
+	diskLayerRawNodeTimer    = metrics.NewRegisteredTimer("aggpathdb/disk/rawnode/time", nil)
+	historyTruncateTimeMeter = metrics.NewRegisteredTimer("aggpathdb/history/truncate/time", nil)
+	perfCommitNodesTimer     = metrics.NewRegisteredTimer("aggpathdb/commit/nodes/time", nil)
 )

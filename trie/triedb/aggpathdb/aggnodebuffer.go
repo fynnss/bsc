@@ -211,6 +211,7 @@ func (b *aggNodeBuffer) canFlush(force bool) bool {
 // memory threshold is reached. Note, all data must be written atomically.
 func (b *aggNodeBuffer) flush(db ethdb.KeyValueStore, bt ethdb.Batch, cleans *aggNodeCache, id uint64) error {
 	// Ensure the target state id is aligned with the internal counter.
+	// TODO: canbe cached??
 	head := rawdb.ReadPersistentStateID(db)
 	if head+b.layers != id {
 		return fmt.Errorf("buffer layers (%d) cannot be applied on top of persisted state id (%d) to reach requested state id (%d)", b.layers, head, id)
@@ -239,7 +240,7 @@ func (b *aggNodeBuffer) flush(db ethdb.KeyValueStore, bt ethdb.Batch, cleans *ag
 	flushBytesMeter.Mark(int64(size))
 	flushNodesMeter.Mark(int64(nodes))
 	flushTimeTimer.UpdateSince(start)
-	log.Debug("Persisted aggPathDB aggNodes", "aggNodes", len(b.aggNodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
+	log.Info("Persisted aggPathDB aggNodes", "aggNodes", len(b.aggNodes), "bytes", common.StorageSize(size), "elapsed", common.PrettyDuration(time.Since(start)))
 	b.reset()
 	return nil
 }

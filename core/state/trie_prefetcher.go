@@ -52,7 +52,7 @@ type prefetchMsg struct {
 type triePrefetcher struct {
 	db         Database               // Database to fetch trie nodes through
 	root       common.Hash            // Root hash of the account trie for metrics
-	rootParent common.Hash            // Root has of the account trie from block before the prvious one, designed for pipecommit mode
+	rootParent common.Hash            // Root hash of the account trie from block before the prvious one, designed for pipecommit mode
 	fetches    map[string]Trie        // Partially or fully fetcher tries
 	fetchers   map[string]*subfetcher // Subfetchers for each trie
 
@@ -93,7 +93,7 @@ func newTriePrefetcher(db Database, root, rootParent common.Hash, namespace stri
 		closeMainDoneChan: make(chan struct{}),
 		prefetchChan:      make(chan *prefetchMsg, concurrentChanSize),
 
-		deliveryMissMeter: metrics.GetOrRegisterMeter(prefix+"/deliverymiss", nil),
+		deliveryMissMeter: metrics.GetOrRegisterMeter(prefix+"/delivery/miss", nil),
 		accountLoadMeter:  metrics.GetOrRegisterMeter(prefix+"/account/load", nil),
 		accountDupMeter:   metrics.GetOrRegisterMeter(prefix+"/account/dup", nil),
 		accountSkipMeter:  metrics.GetOrRegisterMeter(prefix+"/account/skip", nil),
