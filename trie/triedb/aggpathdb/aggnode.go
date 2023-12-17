@@ -100,7 +100,7 @@ func (n *AggNode) Node(path []byte) *trienode.Node {
 		i := path[len(path)-1]
 		tn = n.nodes[int(i)+1]
 	}
-	if tn.Hash == (common.Hash{}) && len(tn.Blob) != 0 {
+	if tn != nil && tn.Hash == (common.Hash{}) && len(tn.Blob) != 0 {
 		h := newHasher()
 		defer h.release()
 		tn.Hash = h.hash(tn.Blob)
