@@ -164,8 +164,8 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// Pebble has a single combined cache area and the write
 		// buffers are taken from this too. Assign all available
 		// memory allowance for cache.
-		Cache:        pebble.NewCache(int64(cache * 1024 * 1024)),
-		MaxOpenFiles: handles,
+		Cache:        pebble.NewCache(int64(cache*1024*1024 + memTableSize*2)),
+		MaxOpenFiles: handles * 4,
 
 		// The size of memory table(as well as the write buffer).
 		// Note, there may have more than two memory tables in the system.
@@ -176,7 +176,7 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		// Note, this must be the number of tables not the size of all memtables
 		// according to https://github.com/cockroachdb/pebble/blob/master/options.go#L738-L742
 		// and to https://github.com/cockroachdb/pebble/blob/master/db.go#L1892-L1903.
-		MemTableStopWritesThreshold: memTableLimit,
+		MemTableStopWritesThreshold: memTableLimit * 2,
 
 		// The default compaction concurrency(1 thread),
 		// Here use all available CPUs for faster compaction.
@@ -193,6 +193,10 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		},
 		Logger: panicLogger{}, // TODO(karalabe): Delete when this is upstreamed in Pebble
 		Levels: make([]pebble.LevelOptions, 7),
+
+		// A value of 2 triggers a compaction when there is 5 sub-level.
+		L0CompactionThreshold: 5,
+		L0StopWritesThreshold: 1000,
 	}
 
 	for i := 0; i < len(opt.Levels); i++ {
@@ -206,6 +210,18 @@ func New(file string, cache int, handles int, namespace string, readonly bool) (
 		}
 		l.EnsureDefaults()
 	}
+	// Automatically flush 10s after the first range tombstone is added to a
+	// memtable. This ensures that we can reclaim space even when there's no
+	// activity on the database generating flushes.
+	opt.FlushDelayDeleteRange = 10 * time.Second
+	// Automatically flush 10s after the first range key is added to a memtable.
+	// This ensures that range keys are quickly flushed, allowing use of lazy
+	// combined iteration within Pebble.
+	opt.FlushDelayRangeKey = 10 * time.Second
+	// Enable deletion pacing. This helps prevent disk slowness events on some
+	// SSDs, that kick off an expensive GC if a lot of files are deleted at
+	// once.
+	opt.TargetByteDeletionRate = 64 << 20 // 128 MB
 
 	// Disable seek compaction explicitly. Check https://github.com/ethereum/go-ethereum/pull/20130
 	// for more details.
@@ -460,6 +476,9 @@ func (d *Database) meter(refresh time.Duration) {
 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
 			level0CompCount    = int64(d.level0Comp.Load())
 		)
+
+		fmt.Printf("db_metrics=\n%v, \ncomp_time=%v, \nwrite_delay_count=%v, \nwrite_delay_time=%v, \nnon_level0_comp_count=%v,\nlevel0_comp_cout=%v\n", metrics, compTime, writeDelayCount, writeDelayTime, nonLevel0CompCount, level0CompCount)
+
 		writeDelayTimes[i%2] = writeDelayTime
 		writeDelayCounts[i%2] = writeDelayCount
 		compTimes[i%2] = compTime
