@@ -181,7 +181,7 @@ func NewWithSharedPool(root common.Hash, db Database, snaps *snapshot.Tree) (*St
 	if err != nil {
 		return nil, err
 	}
-	// statedb.storagePool = NewStoragePool()
+	statedb.storagePool = NewStoragePool()
 	return statedb, nil
 }
 
@@ -222,7 +222,7 @@ func New(root common.Hash, db Database, snaps *snapshot.Tree) (*StateDB, error) 
 }
 
 func (s *StateDB) EnableWriteOnSharedStorage() {
-	// s.writeOnSharedStorage = true
+	s.writeOnSharedStorage = true
 }
 
 // In mining mode, we will try multi-fillTransactions to get the most profitable one.
