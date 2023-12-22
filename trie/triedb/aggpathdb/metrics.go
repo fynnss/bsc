@@ -25,6 +25,12 @@ var (
 	cleanWriteMeter = metrics.NewRegisteredMeter("aggpathdb/clean/write", nil)
 	cleanFalseMeter = metrics.NewRegisteredMeter("aggpathdb/clean/false", nil)
 
+	nodeTimer           = metrics.NewRegisteredTimer("aggpathdb/node/time", nil)
+	nodeBufferTimer     = metrics.NewRegisteredTimer("aggpathdb/node/buffer/time", nil)
+	nodeImmuBufferTimer = metrics.NewRegisteredTimer("aggpathdb/node/immubuffer/time", nil)
+	nodeCleanCacheTimer = metrics.NewRegisteredTimer("aggpathdb/node/cleancache/time", nil)
+	nodeDiskTimer       = metrics.NewRegisteredTimer("aggpathdb/node/disk/time", nil)
+
 	dirtyHitMeter         = metrics.NewRegisteredMeter("aggpathdb/dirty/hit", nil)
 	dirtyMissMeter        = metrics.NewRegisteredMeter("aggpathdb/dirty/miss", nil)
 	dirtyReadMeter        = metrics.NewRegisteredMeter("aggpathdb/dirty/read", nil)
@@ -36,10 +42,12 @@ var (
 	aggNodeHitCleanCacheMeter = metrics.NewRegisteredMeter("aggpathdb/aggnode/hit/cleancache", nil)
 
 	aggNodeMissMeter           = metrics.NewRegisteredMeter("aggpathdb/aggnode/miss", nil)
+	aggNodeDiskMeter           = metrics.NewRegisteredMeter("aggpathdb/aggnode/disk", nil)
 	aggNodeTimeBufferTimer     = metrics.NewRegisteredTimer("aggpathdb/aggnode/time/buffer", nil)
 	aggNodeTimeImmuBufferTimer = metrics.NewRegisteredTimer("aggpathdb/aggnode/time/immubuffer", nil)
 	aggNodeTimeCleanCacheTimer = metrics.NewRegisteredTimer("aggpathdb/aggnode/time/cleancache", nil)
 	aggNodeTimeDiskTimer       = metrics.NewRegisteredTimer("aggpathdb/aggnode/time/disk", nil)
+	aggNodeTimeDiskMissTimer   = metrics.NewRegisteredTimer("aggpathdb/aggnode/time/diskmiss", nil)
 
 	dirtyFalseMeter = metrics.NewRegisteredMeter("aggpathdb/dirty/false", nil)
 	diskFalseMeter  = metrics.NewRegisteredMeter("aggpathdb/disk/false", nil)

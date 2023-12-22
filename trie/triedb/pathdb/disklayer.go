@@ -156,7 +156,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 
 	var start = time.Now()
 	defer diskLayerNodeTimer.UpdateSince(start)
-
+	defer nodeTimer.UpdateSince(start)
 	if dl.stale {
 		return nil, errSnapshotStale
 	}
@@ -178,6 +178,7 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 	// Try to retrieve the trie node from the clean memory cache
 	key := cacheKey(owner, path)
 	if dl.cleans != nil {
+		start1 := time.Now()
 		if blob := dl.cleans.Get(nil, key); len(blob) > 0 {
 			h := newHasher()
 			defer h.release()
@@ -192,8 +193,12 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", got)
 		}
 		cleanMissMeter.Mark(1)
+		nodeCleanCacheTimer.UpdateSince(start1)
 	}
 	// Try to retrieve the trie node from the disk.
+	diskStart := time.Now()
+	defer nodeDiskTimer.UpdateSince(diskStart)
+
 	var (
 		nBlob []byte
 		nHash common.Hash

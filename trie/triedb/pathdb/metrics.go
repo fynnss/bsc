@@ -24,6 +24,12 @@ var (
 	cleanReadMeter  = metrics.NewRegisteredMeter("pathdb/clean/read", nil)
 	cleanWriteMeter = metrics.NewRegisteredMeter("pathdb/clean/write", nil)
 
+	nodeTimer           = metrics.NewRegisteredTimer("pathdb/node/time", nil)
+	nodeBufferTimer     = metrics.NewRegisteredTimer("pathdb/node/buffer/time", nil)
+	nodeImmuBufferTimer = metrics.NewRegisteredTimer("pathdb/node/immubuffer/time", nil)
+	nodeCleanCacheTimer = metrics.NewRegisteredTimer("pathdb/node/cleancache/time", nil)
+	nodeDiskTimer       = metrics.NewRegisteredTimer("pathdb/node/disk/time", nil)
+
 	dirtyHitMeter         = metrics.NewRegisteredMeter("pathdb/dirty/hit", nil)
 	dirtyMissMeter        = metrics.NewRegisteredMeter("pathdb/dirty/miss", nil)
 	dirtyReadMeter        = metrics.NewRegisteredMeter("pathdb/dirty/read", nil)

@@ -170,11 +170,11 @@ func (n *AggNode) encodeTo() []byte {
 	for k, node := range n.nodes {
 		if node != nil {
 			if k == 0 {
-				writeRawNode(w, []byte("")) // root key
+				writeRawNode(&w, []byte("")) // root key
 			} else {
-				writeRawNode(w, []byte(string(k-1))) // sub key
+				writeRawNode(&w, []byte(string(k-1))) // sub key
 			}
-			writeRawNode(w, node.Blob) // value
+			writeRawNode(&w, node.Blob) // value
 		}
 	}
 	w.ListEnd(offset)
@@ -183,7 +183,44 @@ func (n *AggNode) encodeTo() []byte {
 	return result
 }
 
-func writeRawNode(w rlp.EncoderBuffer, n []byte) {
+func (n *AggNode) encodeToBuffer(w *rlp.EncoderBuffer) {
+	offset := w.List()
+
+	for k, node := range n.nodes {
+		if node != nil {
+			if k == 0 {
+				writeRawNode(w, []byte("")) // root key
+			} else {
+				writeRawNode(w, []byte(string(k-1))) // sub key
+			}
+			writeRawNode(w, node.Blob) // value
+		}
+	}
+	w.ListEnd(offset)
+}
+
+func aggregatedNodes(nodes map[common.Hash]map[string]*trienode.Node) map[common.Hash]map[string]*AggNode {
+	aggnodes := make(map[common.Hash]map[string]*AggNode)
+	for owner, subset := range nodes {
+		current, exist := aggnodes[owner]
+		if !exist {
+			current = make(map[string]*AggNode)
+		}
+		for path, n := range subset {
+			aggpath := ToAggPath([]byte(path))
+			aggnode, ok := current[string(aggpath)]
+			if !ok {
+				aggnode = &AggNode{}
+				current[string(aggpath)] = aggnode
+			}
+			aggnode.Update([]byte(path), n)
+		}
+		aggnodes[owner] = current
+	}
+	return aggnodes
+}
+
+func writeRawNode(w *rlp.EncoderBuffer, n []byte) {
 	if n == nil {
 		w.Write(rlp.EmptyString)
 	} else {

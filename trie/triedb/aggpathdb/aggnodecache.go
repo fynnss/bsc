@@ -35,6 +35,7 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 	key := cacheKey(owner, aggPath)
 
 	if c.cleans != nil {
+		cleanstart := time.Now()
 		if blob := c.cleans.Get(nil, key); len(blob) > 0 {
 			aggNode, err := DecodeAggNode(blob)
 			if err != nil {
@@ -56,8 +57,11 @@ func (c *aggNodeCache) node(owner common.Hash, path []byte, hash common.Hash) ([
 			log.Error("Unexpected trie node in clean cache", "owner", owner, "path", path, "expect", hash, "got", n.Hash)
 		}
 		cleanMissMeter.Mark(1)
+		nodeCleanCacheTimer.UpdateSince(cleanstart)
 	}
 
+	start := time.Now()
+	defer nodeDiskTimer.UpdateSince(start)
 	// Try to retrieve the trie node from the disk.
 	v, err, _ := g.Do(string(key), func() (interface{}, error) {
 		start := time.Now()
@@ -120,7 +124,6 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, err
 			return DecodeAggNode(blob)
 		}
 	}
-	aggNodeMissMeter.Mark(1)
 	start2 := time.Now()
 	// cache miss
 	if owner == (common.Hash{}) {
@@ -129,9 +132,12 @@ func (c *aggNodeCache) aggNode(owner common.Hash, aggPath []byte) (*AggNode, err
 		blob = rawdb.ReadStorageTrieAggNode(c.db.diskdb, owner, aggPath)
 	}
 	if blob == nil {
+		aggNodeMissMeter.Mark(1)
+		aggNodeTimeDiskMissTimer.UpdateSince(start2)
 		return nil, nil
 	}
 	defer aggNodeTimeDiskTimer.UpdateSince(start2)
+	aggNodeDiskMeter.Mark(1)
 
 	return DecodeAggNode(blob)
 }
