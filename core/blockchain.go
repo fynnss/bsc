@@ -332,16 +332,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, genesis *Genesis
 		return nil, genesisErr
 	}
 	log.Info("Initialised chain configuration", "config", chainConfig)
-	// Description of chainConfig is empty now
-	/*
-		log.Info("")
-		log.Info(strings.Repeat("-", 153))
-		for _, line := range strings.Split(chainConfig.Description(), "\n") {
-			log.Info(line)
-		}
-		log.Info(strings.Repeat("-", 153))
-		log.Info("")
-	*/
 
 	bc := &BlockChain{
 		chainConfig:        chainConfig,
