@@ -50,6 +50,13 @@ const (
 	metricsGatheringInterval = 3 * time.Second
 )
 
+var (
+	// for perf performance
+	pebbleGetTimer        = metrics.NewRegisteredTimer("pebble/get/time", nil)
+	pebblePutTimer        = metrics.NewRegisteredTimer("pebble/put/time", nil)
+	pebbleBatchWriteTimer = metrics.NewRegisteredTimer("pebble/batch/write/time", nil)
+)
+
 // Database is a persistent key-value store based on the pebble storage engine.
 // Apart from basic data storage functionality it also supports batch writes and
 // iterating over the keyspace in binary-alphabetical order.
@@ -277,6 +284,8 @@ func (d *Database) Has(key []byte) (bool, error) {
 
 // Get retrieves the given key if it's present in the key-value store.
 func (d *Database) Get(key []byte) ([]byte, error) {
+	start := time.Now()
+	defer pebbleGetTimer.UpdateSince(start)
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -294,6 +303,8 @@ func (d *Database) Get(key []byte) ([]byte, error) {
 
 // Put inserts the given value into the key-value store.
 func (d *Database) Put(key []byte, value []byte) error {
+	start := time.Now()
+	defer pebblePutTimer.UpdateSince(start)
 	d.quitLock.RLock()
 	defer d.quitLock.RUnlock()
 	if d.closed {
@@ -460,6 +471,9 @@ func (d *Database) meter(refresh time.Duration) {
 			nonLevel0CompCount = int64(d.nonLevel0Comp.Load())
 			level0CompCount    = int64(d.level0Comp.Load())
 		)
+		fmt.Printf("db_metrics=\n%v, \ncomp_time=%v, \nwrite_delay_count=%v, \nwrite_delay_time=%v, \nnon_level0_comp_count=%v, \nlevel0_comp_cout=%v\n",
+			metrics, compTime, writeDelayCount, writeDelayTime, nonLevel0CompCount, level0CompCount)
+
 		writeDelayTimes[i%2] = writeDelayTime
 		writeDelayCounts[i%2] = writeDelayCount
 		compTimes[i%2] = compTime
@@ -550,6 +564,8 @@ func (b *batch) ValueSize() int {
 
 // Write flushes any accumulated data to disk.
 func (b *batch) Write() error {
+	start := time.Now()
+	defer pebbleBatchWriteTimer.UpdateSince(start)
 	b.db.quitLock.RLock()
 	defer b.db.quitLock.RUnlock()
 	if b.db.closed {

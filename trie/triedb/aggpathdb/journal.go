@@ -272,18 +272,18 @@ func (dl *diskLayer) journal(w io.Writer) error {
 	for owner, subset := range aggnodes {
 		entry := journalNodes{Owner: owner}
 		for aggpath, aggnode := range subset {
-			if aggnode.root != nil {
-				entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(aggpath), Blob: aggnode.root.Blob})
-			}
-			for i, n := range aggnode.childes {
+			for i, n := range aggnode.nodes {
 				if n != nil {
-					entry.Nodes = append(entry.Nodes, journalNode{Path: append([]byte(aggpath), byte(i)), Blob: n.Blob})
+					if i == 0 {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: []byte(aggpath), Blob: n.Blob})
+					} else {
+						entry.Nodes = append(entry.Nodes, journalNode{Path: append([]byte(aggpath), byte(i-1)), Blob: n.Blob})
+					}
 				}
 			}
 		}
 		nodes = append(nodes, entry)
 	}
-
 	if err := rlp.Encode(w, nodes); err != nil {
 		return err
 	}
