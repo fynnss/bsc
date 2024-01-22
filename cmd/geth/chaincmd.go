@@ -617,9 +617,13 @@ func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, eth
 	}
 
 	db := utils.MakeChainDatabase(ctx, stack, true, false)
-	scheme, err := utils.ParseStateScheme(ctx, db)
+	provided, err := utils.CompareStateSchemeCLIWithConfig(ctx)
 	if err != nil {
-		return nil, nil, common.Hash{}, fmt.Errorf("failed to parse state scheme: %v", err)
+		return nil, nil, common.Hash{}, err
+	}
+	scheme, err := rawdb.ParseStateScheme(provided, db)
+	if err != nil {
+		return nil, nil, common.Hash{}, err
 	}
 	var header *types.Header
 	if scheme == rawdb.PathScheme {
@@ -664,6 +668,7 @@ func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, eth
 				log.Info("State dump configured", "mpt root hash", stateRoot,
 					"skipcode", conf.SkipCode, "skipstorage", conf.SkipStorage,
 					"start", hexutil.Encode(conf.Start), "limit", conf.Max)
+				conf.StateScheme = rawdb.PathScheme
 				return conf, db, stateRoot, nil
 			} else {
 				return nil, nil, common.Hash{}, fmt.Errorf("no top state root hash in path db")
@@ -702,6 +707,7 @@ func parseDumpConfig(ctx *cli.Context, stack *node.Node) (*state.DumpConfig, eth
 	log.Info("State dump configured", "block", header.Number, "hash", header.Hash().Hex(),
 		"skipcode", conf.SkipCode, "skipstorage", conf.SkipStorage,
 		"start", hexutil.Encode(conf.Start), "limit", conf.Max)
+	conf.StateScheme = scheme
 	return conf, db, header.Root, nil
 }
 
