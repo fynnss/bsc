@@ -154,14 +154,14 @@ func (t *StateTrie) GetAccount(address common.Address, direct bool) (*types.Stat
 			ret := new(types.StateAccount)
 			err = rlp.DecodeBytes(res, ret)
 			if err != nil {
-				panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, err: %v", len(res), len(res1), err))
+				panic(fmt.Sprintf("Account mismatch, account: %s, len(res): %d, len(res1): %d, err: %v", common.Bytes2Hex(t.hashKey(address.Bytes())), len(res), len(res1), err))
 			}
 			ret1 := new(types.StateAccount)
 			err = rlp.DecodeBytes(res, ret1)
 			if err != nil {
-				panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, err: %v", len(res), len(res1), err1))
+				panic(fmt.Sprintf("Account mismatch,account: %s, len(res): %d, len(res1): %d, err: %v", common.Bytes2Hex(t.hashKey(address.Bytes())), len(res), len(res1), err1))
 			}
-			panic(fmt.Sprintf("Account mismatch, len(res): %d, len(res1): %d, acc: %v, acc1: %v", len(res), len(res1), ret, ret1))
+			panic(fmt.Sprintf("Account mismatch, account: %s, len(res): %d, len(res1): %d, acc: %v, acc1: %v", common.Bytes2Hex(t.hashKey(address.Bytes())), len(res), len(res1), ret, ret1))
 		}
 
 		ret := new(types.StateAccount)
