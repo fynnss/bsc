@@ -83,18 +83,21 @@ func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte,
 	it := db.NewIterator(trieNodeAccountPrefix, nil)
 	defer it.Release()
 
-	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) && it.Error() == nil {
-		dbKey := it.Key()
-		if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
-			data := it.Value()
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) {
+		if it.Error() == nil {
+			dbKey := it.Key()
+			if strings.HasPrefix(string(accountTrieNodeKey(EncodeNibbles(key))), string(dbKey)) {
+				data := it.Value()
+				h := newHasher()
+				defer h.release()
+				return data, dbKey[1:], h.hash(data)
+			} else {
+				log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
+			}
 		} else {
-			log.Debug("ReadAccountFromTrieDirectly", "dbKey", common.Bytes2Hex(dbKey), "target key", common.Bytes2Hex(accountTrieNodeKey(EncodeNibbles(key))))
+			log.Error("ReadAccountFromTrieDirectly", "iterater error", it.Error())
+			panic(fmt.Sprintf("ReadAccountFromTrieDirectly, err %v", it.Error()))
 		}
-	} else {
-		log.Error("ReadAccountFromTrieDirectly", "iterater error", it.Error())
 	}
 	return nil, nil, common.Hash{}
 }
@@ -158,13 +161,17 @@ func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key
 	it := db.NewIterator(trieNodeStoragePrefix, nil)
 	defer it.Release()
 
-	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) && it.Error() == nil {
-		dbKey := it.Key()
-		if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
-			data := it.Value()
-			h := newHasher()
-			defer h.release()
-			return data, dbKey[1:], h.hash(data)
+	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) {
+		if it.Error() == nil {
+			dbKey := it.Key()
+			if strings.HasPrefix(string(storageTrieNodeKey(accountHash, EncodeNibbles(key))), string(dbKey)) {
+				data := it.Value()
+				h := newHasher()
+				defer h.release()
+				return data, dbKey[1:], h.hash(data)
+			}
+		} else {
+			panic(fmt.Sprintf("read from database error %v", it.Error()))
 		}
 	}
 	return nil, nil, common.Hash{}
