@@ -683,6 +683,7 @@ func (t *Trie) Owner() common.Hash {
 
 func (t *Trie) GetDirectly(key []byte) ([]byte, error) {
 	if t.reader.reader == nil {
+		log.Error("GetDirectly reader nil", "owner", t.owner.String(), "key", common.Bytes2Hex(key))
 		return nil, nil
 	}
 	if t.owner == (common.Hash{}) {
