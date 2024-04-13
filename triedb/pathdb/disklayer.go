@@ -188,7 +188,6 @@ func (dl *diskLayer) Account(hash common.Hash) ([]byte, error) {
 		return data, nil
 	}
 
-	// TODO: seek from diskdb
 	return dl.readAccountTrie(hash), nil
 }
 
@@ -201,7 +200,6 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	if data, exist := dl.buffer.storage(accountHash, storageHash); exist {
 		return data, nil
 	}
-	// TODO: seek from clean cache
 
 	return dl.readStorageTrie(accountHash, storageHash), nil
 }
@@ -290,6 +288,7 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 
 	if bytes.Compare(key, hash.Bytes()) == 0 {
 		readAccLeftNodeTimer.UpdateSince(start)
+		log.Info("Read account from disklayer", "accountHash", hash.String(), "val", len(val))
 		return val
 	} else {
 		log.Debug("account short node info ", "account hash", hash.String(), "gotten key", hex.EncodeToString(key), "path", common.Bytes2Hex(path))
@@ -308,6 +307,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	diskStorageLeftNodeTimer.UpdateSince(start)
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
+		log.Info("Read Storage Trie from disklayer", "accountHash", accountHash.String(), "storageHash", storageHash.String(), "val", len(val))
 		return val
 	}
 

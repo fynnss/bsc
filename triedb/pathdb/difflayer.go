@@ -103,10 +103,12 @@ func (dl *diffLayer) Account(hash common.Hash) ([]byte, error) {
 	defer dl.lock.RUnlock()
 
 	if data, ok := dl.states.LatestAccounts[hash]; ok {
+		log.Info("Read account from difflayer", "accountHash", hash.String(), "val", len(data))
 		return data, nil
 	}
 
 	if _, ok := dl.states.DestructSet[hash]; ok {
+		log.Info("Read account from difflayer destruct set", "accountHash", hash.String())
 		return nil, nil
 	}
 	return dl.parent.Account(hash)
@@ -120,11 +122,13 @@ func (dl *diffLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 
 	if storage, ok := dl.states.LatestStorages[accountHash]; ok {
 		if data, ok := storage[storageHash]; ok {
+			log.Info("Read storage from difflayer", "accountHash", accountHash.String(), "storageHash", storageHash.String(), "val", len(data))
 			return data, nil
 		}
 	}
 
 	if _, ok := dl.states.DestructSet[accountHash]; ok {
+		log.Info("Read storage from difflayer destructSet", "accountHash", accountHash.String(), "storageHash", storageHash.String())
 		return nil, nil
 	}
 

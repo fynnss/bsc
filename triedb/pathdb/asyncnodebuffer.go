@@ -294,10 +294,12 @@ func newNodeCache(limit, size uint64,
 
 func (nc *nodecache) account(hash common.Hash) ([]byte, bool) {
 	if data, ok := nc.LatestAccounts[hash]; ok {
+		log.Info("Read account from nodecache", "is background", nc.immutable, "accountHash", hash.String(), "val", len(data))
 		return data, true
 	}
 
 	if _, ok := nc.DestructSet[hash]; ok {
+		log.Info("Read account from nodecache destructSet", "accountHash", hash.String())
 		return nil, true
 	}
 	return nil, false
@@ -306,11 +308,13 @@ func (nc *nodecache) account(hash common.Hash) ([]byte, bool) {
 func (nc *nodecache) storage(accountHash, storageHash common.Hash) ([]byte, bool) {
 	if storage, ok := nc.LatestStorages[accountHash]; ok {
 		if data, ok := storage[storageHash]; ok {
+			log.Info("Read Storage from nodecache", "is background", nc.immutable, "accountHash", accountHash.String(), "storageHash", storageHash.String(), "val", len(data))
 			return data, true
 		}
 	}
 
 	if _, ok := nc.DestructSet[accountHash]; ok {
+		log.Info("Read Storage from nodecache destructSet", "accountHash", accountHash.String(), "storageHash", storageHash.String())
 		return nil, true
 	}
 	return nil, false

@@ -80,7 +80,7 @@ func ReadAccountTrieNode(db ethdb.KeyValueReader, path []byte) ([]byte, common.H
 }
 
 func ReadAccountFromTrieDirectly(db ethdb.Database, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(trieNodeAccountPrefix, nil)
+	it := db.NewIterator(nil, nil)
 	defer it.Release()
 
 	if it.Seek(accountTrieNodeKey(EncodeNibbles(key))) {
@@ -158,7 +158,7 @@ func ReadStorageTrieNode(db ethdb.KeyValueReader, accountHash common.Hash, path 
 }
 
 func ReadStorageFromTrieDirectly(db ethdb.Database, accountHash common.Hash, key []byte) ([]byte, []byte, common.Hash) {
-	it := db.NewIterator(trieNodeStoragePrefix, nil)
+	it := db.NewIterator(nil, nil)
 	defer it.Release()
 
 	if it.Seek(storageTrieNodeKey(accountHash, EncodeNibbles(key))) {
