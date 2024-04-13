@@ -20,8 +20,11 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"math/rand"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func TestHexCompact(t *testing.T) {
@@ -46,6 +49,11 @@ func TestHexCompact(t *testing.T) {
 			t.Errorf("compactToHex(%x) -> %x, want %x", test.compact, h, test.hex)
 		}
 	}
+}
+func TestHexToKeyBytes2(t *testing.T) {
+	path := common.FromHex("0x0d0f06")
+	nodeKey := common.FromHex("0x0906060c0907010005010c030d05040e0c05090106020600060503010409030a05010400040a0000020804020f05060000090d070e050c0f040a080c0710")
+	fmt.Printf("hex: %s", common.Bytes2Hex(hexToKeybytes(append(path, nodeKey...))))
 }
 
 func TestHexKeybytes(t *testing.T) {
