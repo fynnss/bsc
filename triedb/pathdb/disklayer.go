@@ -310,7 +310,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 		log.Info("Read Storage Trie from disklayer", "accountHash", accountHash.String(), "storageHash", storageHash.String(), "val", len(val))
 		return val
 	}
-
+	log.Info("Read Storage Trie from disklayer miss", "accountHash", accountHash.String(), "storageHash", storageHash.String(), "dbKey", common.Bytes2Hex(key))
 	return nil
 }
 
