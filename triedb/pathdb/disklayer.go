@@ -302,6 +302,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	key := storageHash.Bytes()
 	nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(dl.db.diskdb, accountHash, key)
 	if nBlob == nil {
+		log.Info("Read Storage directly from disklayer miss", "accountHash", accountHash.String(), "storageHash", storageHash.String(), "dbKey", common.Bytes2Hex(key))
 		return nil
 	}
 	diskStorageLeftNodeTimer.UpdateSince(start)
