@@ -59,6 +59,11 @@ var (
 	readAndDecodeAccountTimer = metrics.NewRegisteredTimer("pathdb/disk/readtrie/account/totaltime", nil)
 	readAndDecodeStorageTimer = metrics.NewRegisteredTimer("pathdb/disk/readtrie/storage/totaltime", nil)
 
+	diskExistAccountTimer    = metrics.NewRegisteredTimer("pathdb/disk/exit/account/timer", nil)
+	diskExistStorageTimer    = metrics.NewRegisteredTimer("pathdb/disk/exit/storage/timer", nil)
+	diskNotExistAccountTimer = metrics.NewRegisteredTimer("pathdb/disk/noexit/account/timer", nil)
+	diskNotExistStorageTimer = metrics.NewRegisteredTimer("pathdb/disk/noexit/storage/timer", nil)
+
 	diskTotalAccountCounter     = metrics.NewRegisteredCounter("pathdb/disk/readtrie/account/counter", nil)
 	diskTotalStorageCounter     = metrics.NewRegisteredCounter("pathdb/disk/readtrie/storage/counter", nil)
 	diskTotalMissAccoutCounter  = metrics.NewRegisteredCounter("pathdb/disk/readtrie/account/misscounter", nil)

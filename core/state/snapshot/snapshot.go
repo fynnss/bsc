@@ -61,6 +61,11 @@ var (
 	snapshotStorageDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/storage/timer", nil)
 	snapshotAccountDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/account/timer", nil)
 
+	snapshotExistStorageDiskTimer    = metrics.NewRegisteredTimer("state/snapshot/disk/storage/exist", nil)
+	snapshotExistAccountDiskTimer    = metrics.NewRegisteredTimer("state/snapshot/disk/account/exist", nil)
+	snapshotNotExistStorageDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/storage/noexist", nil)
+	snapshotNotExistAccountDiskTimer = metrics.NewRegisteredTimer("state/snapshot/disk/account/noexist", nil)
+
 	snapshotDirtyAccountHitDepthHist = metrics.NewRegisteredHistogram("state/snapshot/dirty/account/hit/depth", nil, metrics.NewExpDecaySample(1028, 0.015))
 
 	snapshotFlushAccountItemMeter = metrics.NewRegisteredMeter("state/snapshot/flush/account/item", nil)

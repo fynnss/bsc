@@ -312,10 +312,18 @@ func (dl *diskLayer) Node(owner common.Hash, path []byte, hash common.Hash) ([]b
 // readAccountTrie return value of the account leaf node directly from the db
 func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	start := time.Now()
+	var endDBtime time.Time
+	findValue := false
 	defer func() {
 		readAndDecodeAccountTimer.UpdateSince(start)
+		if findValue {
+			diskExistAccountTimer.Update(endDBtime.Sub(start))
+		} else {
+			diskNotExistAccountTimer.Update(endDBtime.Sub(start))
+		}
 	}()
 	nBlob, path, nHash := rawdb.ReadAccountFromTrieDirectly(dl.db.diskdb, hash.Bytes())
+	endDBtime = time.Now()
 	diskReadAccountTimer.UpdateSince(start)
 	if nBlob == nil {
 		return nil
@@ -324,6 +332,7 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 	diskTotalAccountCounter.Inc(1)
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path, nBlob)
 	if bytes.Compare(key, hash.Bytes()) == 0 {
+		findValue = true
 		return val
 	} else {
 		log.Debug("account short node info ", "account hash", hash.String(), "gotten key", hex.EncodeToString(key), "path", common.Bytes2Hex(path))
@@ -335,11 +344,19 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 // readStorageTrie return value of the storage leaf node directly from the db
 func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byte {
 	start := time.Now()
+	var endDBtime time.Time
+	findValue := false
 	defer func() {
 		readAndDecodeStorageTimer.UpdateSince(start)
+		if findValue {
+			diskExistStorageTimer.Update(endDBtime.Sub(start))
+		} else {
+			diskNotExistStorageTimer.Update(endDBtime.Sub(start))
+		}
 	}()
 	key := storageHash.Bytes()
 	nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(dl.db.diskdb, accountHash, key)
+	endDBtime = time.Now()
 	diskReadStorageTimer.UpdateSince(start)
 	if nBlob == nil {
 		return nil
@@ -349,6 +366,7 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 	diskTotalStorageCounter.Inc(1)
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
+		findValue = true
 		return val
 	}
 	diskTotalMissStorageCounter.Inc(1)

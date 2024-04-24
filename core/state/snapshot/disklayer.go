@@ -141,13 +141,16 @@ func (dl *diskLayer) AccountRLP(hash common.Hash) ([]byte, error) {
 	// Cache doesn't contain account, pull from disk and cache for later
 	blob := rawdb.ReadAccountSnapshot(dl.diskdb, hash)
 	snapshotAccountDiskTimer.Update(time.Since(start))
+	endDBTime := time.Now()
 	dl.cache.Set(hash[:], blob)
 
 	snapshotCleanAccountMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanAccountWriteMeter.Mark(int64(n))
+		snapshotExistAccountDiskTimer.Update(endDBTime.Sub(start))
 	} else {
 		snapshotCleanAccountInexMeter.Mark(1)
+		snapshotNotExistAccountDiskTimer.Update(endDBTime.Sub(start))
 	}
 	return blob, nil
 }
@@ -183,14 +186,17 @@ func (dl *diskLayer) Storage(accountHash, storageHash common.Hash) ([]byte, erro
 	start := time.Now()
 	// Cache doesn't contain storage slot, pull from disk and cache for later
 	blob := rawdb.ReadStorageSnapshot(dl.diskdb, accountHash, storageHash)
+	endDBtime := time.Now()
 	snapshotStorageDiskTimer.Update(time.Since(start))
 	dl.cache.Set(key, blob)
 
 	snapshotCleanStorageMissMeter.Mark(1)
 	if n := len(blob); n > 0 {
 		snapshotCleanStorageWriteMeter.Mark(int64(n))
+		snapshotExistStorageDiskTimer.Update(endDBtime.Sub(start))
 	} else {
 		snapshotCleanStorageInexMeter.Mark(1)
+		snapshotNotExistStorageDiskTimer.Update(endDBtime.Sub(start))
 	}
 	return blob, nil
 }
