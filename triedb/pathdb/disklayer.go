@@ -322,14 +322,16 @@ func (dl *diskLayer) readAccountTrie(hash common.Hash) []byte {
 			diskNotExistAccountTimer.Update(endDBtime.Sub(start))
 		}
 	}()
+	diskTotalAccountCounter.Inc(1)
 	nBlob, path, nHash := rawdb.ReadAccountFromTrieDirectly(dl.db.diskdb, hash.Bytes())
 	endDBtime = time.Now()
 	diskReadAccountTimer.UpdateSince(start)
 	if nBlob == nil {
+		diskTotalMissAccoutCounter.Inc(1)
 		return nil
 	}
 	dl.cleans.nodes.Set(cacheKey(common.Hash{}, path[:]), nBlob)
-	diskTotalAccountCounter.Inc(1)
+
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path, nBlob)
 	if bytes.Compare(key, hash.Bytes()) == 0 {
 		findValue = true
@@ -354,16 +356,16 @@ func (dl *diskLayer) readStorageTrie(accountHash, storageHash common.Hash) []byt
 			diskNotExistStorageTimer.Update(endDBtime.Sub(start))
 		}
 	}()
+	diskTotalStorageCounter.Inc(1)
 	key := storageHash.Bytes()
 	nBlob, path, nHash := rawdb.ReadStorageFromTrieDirectly(dl.db.diskdb, accountHash, key)
 	endDBtime = time.Now()
 	diskReadStorageTimer.UpdateSince(start)
 	if nBlob == nil {
+		diskTotalMissStorageCounter.Inc(1)
 		return nil
 	}
 	dl.cleans.nodes.Set(cacheKey(accountHash, path[common.HashLength:]), nBlob)
-
-	diskTotalStorageCounter.Inc(1)
 	val, key := trie.DecodeLeafNode(nHash.Bytes(), path[common.HashLength:], nBlob)
 	if bytes.Compare(storageHash.Bytes(), key) == 0 {
 		findValue = true
