@@ -1320,6 +1320,14 @@ Please note that --` + MetricsHTTPFlag.Name + ` must be set to start the server.
 		Value:    "",
 		Category: flags.StateCategory,
 	}
+
+	// Block Access List flags
+
+	ExperimentalBALFlag = &cli.BoolFlag{
+		Name:     "experimentalbal",
+		Usage:    "Enable block-access-list building when importing post-Cancun blocks, and validation that access lists contained in post-Cancun blocks correctly correspond to the state changes in those blocks. This is used for development purposes only.  Do not enable it otherwise.",
+		Category: flags.MiscCategory,
+	}
 )
 
 var (
@@ -2366,6 +2374,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 		}
 	}
 
+	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
+}
+
 	// Download and merge incremental snapshot config
 	if ctx.IsSet(UseRemoteIncrSnapshotFlag.Name) {
 		cfg.UseRemoteIncrSnapshot = true
@@ -2841,6 +2852,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node, readonly bool) (*core.BlockCh
 	}
 	options.VmConfig = vmcfg
 
+	options.EnableBAL = ctx.Bool(ExperimentalBALFlag.Name)
 	chain, err := core.NewBlockChain(chainDb, gspec, engine, options)
 	if err != nil {
 		Fatalf("Can't create BlockChain: %v", err)

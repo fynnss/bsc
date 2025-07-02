@@ -93,9 +93,10 @@ var (
 // information of the sealing block generation.
 type environment struct {
 	signer   types.Signer
-	state    *state.StateDB // apply state changes here
-	tcount   int            // count of non-system transactions in cycle
-	gasPool  *core.GasPool  // available gas used to pack transactions
+	state    state.BlockProcessingDB // apply state changes here
+	tcount   int                     // count of non-system transactions in cycle
+	size     uint64                  // size of the block we are building
+	gasPool  *core.GasPool           // available gas used to pack transactions
 	coinbase common.Address
 	evm      *vm.EVM
 
@@ -150,7 +151,7 @@ func (env *environment) discard() {
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
 	receipts  []*types.Receipt
-	state     *state.StateDB
+	state     state.BlockProcessingDB
 	block     *types.Block
 	createdAt time.Time
 
@@ -176,12 +177,12 @@ type newWorkReq struct {
 type newPayloadResult struct {
 	err      error
 	block    *types.Block
-	fees     *big.Int               // total block fees
-	sidecars []*types.BlobTxSidecar // collected blobs of blob transactions
-	stateDB  *state.StateDB         // StateDB after executing the transactions
-	receipts []*types.Receipt       // Receipts collected during construction
-	requests [][]byte               // Consensus layer requests collected during block construction
-	witness  *stateless.Witness     // Witness is an optional stateless proof
+	fees     *big.Int                // total block fees
+	sidecars []*types.BlobTxSidecar  // collected blobs of blob transactions
+	stateDB  state.BlockProcessingDB // StateDB after executing the transactions
+	receipts []*types.Receipt        // Receipts collected during construction
+	requests [][]byte                // Consensus layer requests collected during block construction
+	witness  *stateless.Witness      // Witness is an optional stateless proof
 }
 
 // getWorkReq represents a request for getting a new sealing work with provided parameters.
@@ -239,7 +240,7 @@ type worker struct {
 	snapshotMu       sync.RWMutex // The lock used to protect the snapshots below
 	snapshotBlock    *types.Block
 	snapshotReceipts types.Receipts
-	snapshotState    *state.StateDB
+	snapshotState    state.BlockProcessingDB
 
 	// atomic status counters
 	running atomic.Bool // The indicator whether the consensus engine is running or not.
@@ -374,7 +375,7 @@ func (w *worker) setPrioAddresses(prio []common.Address) {
 
 // Pending returns the currently pending block, associated receipts and statedb.
 // The returned values can be nil in case the pending block is not initialized.
-func (w *worker) pending() (*types.Block, types.Receipts, *state.StateDB) {
+func (w *worker) pending() (*types.Block, types.Receipts, state.BlockProcessingDB) {
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
 	if w.snapshotState == nil {
@@ -694,7 +695,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 	prevEnv *environment, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit
-	state, err := w.chain.StateAt(parent.Root)
+	st, err := w.chain.StateAt(parent.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -703,23 +704,30 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 		if err != nil {
 			return nil, err
 		}
-		state.StartPrefetcher("miner", bundle)
+		st.StartPrefetcher("miner", bundle)
 	} else {
 		if prevEnv == nil {
-			state.StartPrefetcher("miner", nil)
+			st.StartPrefetcher("miner", nil)
 		} else {
-			state.TransferPrefetcher(prevEnv.state)
+			st.TransferPrefetcher(prevEnv.state.(*state.StateDB))
 		}
+	}
+	var sdb state.BlockProcessingDB = st
+	if w.chainConfig.IsEnableBAL() {
+		// TODO: if I disable this, the local devnet still works fine with empty BALs... clearly there is some bug afoot
+		st.EnableStateDiffRecording()
+		sdb = state.NewBlockAccessListBuilder(st)
 	}
 
 	// Note the passed coinbase may be different with header.Coinbase.
 	env := &environment{
 		signer:   types.MakeSigner(w.chainConfig, header.Number, header.Time),
-		state:    state,
+		state:    st,
 		coinbase: coinbase,
 		header:   header,
-		witness:  state.Witness(),
-		evm:      vm.NewEVM(core.NewEVMBlockContext(header, w.chain, &coinbase), state, w.chainConfig, vm.Config{}),
+		size:     uint64(header.Size()),
+		witness:  sdb.Witness(),
+		evm:      vm.NewEVM(core.NewEVMBlockContext(header, w.chain, &coinbase), sdb, w.chainConfig, vm.Config{}),
 	}
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0
@@ -1221,11 +1229,11 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 			return &newPayloadResult{err: err}
 		}
 		// EIP-7002
-		if err := core.ProcessWithdrawalQueue(&requests, work.evm); err != nil {
+		if _, _, err := core.ProcessWithdrawalQueue(&requests, work.evm); err != nil {
 			return &newPayloadResult{err: err}
 		}
 		// EIP-7251 consolidations
-		if err := core.ProcessConsolidationQueue(&requests, work.evm); err != nil {
+		if _, _, err := core.ProcessConsolidationQueue(&requests, work.evm); err != nil {
 			return &newPayloadResult{err: err}
 		}
 	}
@@ -1236,6 +1244,11 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 
 	fees := work.state.GetBalance(consensus.SystemAddress)
 	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts, nil)
+	if w.chainConfig.IsEnableBAL() {
+		body := block.Body()
+		body.AccessList = work.state.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+		block = block.WithBody(*body)
+	}
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}

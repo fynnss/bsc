@@ -197,7 +197,7 @@ func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
 	if err != nil {
 		return nil, nil, nil
 	}
-	return miner.worker.chain.GetBlockByHash(block.Hash()), miner.worker.chain.GetReceiptsByHash(block.Hash()), stateDb
+	return miner.worker.chain.GetBlockByHash(block.Hash()), miner.worker.chain.GetReceiptsByHash(block.Hash()), stateDb.(*state.StateDB)
 }
 
 // SetExtra sets the content used to initialize the block extra field.

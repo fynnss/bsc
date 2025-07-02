@@ -190,6 +190,7 @@ var (
 		utils.IncrSnapshotKeptBlocksFlag,
 		utils.UseRemoteIncrSnapshotFlag,
 		utils.RemoteIncrSnapshotURLFlag,
+		utils.ExperimentalBALFlag,
 		// utils.BeaconApiFlag,
 		// utils.BeaconApiHeaderFlag,
 		// utils.BeaconThresholdFlag,

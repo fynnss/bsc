@@ -17,15 +17,19 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/core/types/bal"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ethereum/go-ethereum/core/stateless"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/internal/ethapi"
@@ -191,7 +195,6 @@ func (api *DebugAPI) AccountRange(blockNrOrHash rpc.BlockNumberOrHash, start hex
 		OnlyWithAddresses: !incompletes,
 		Start:             start,
 		Max:               uint64(maxResults),
-		StateScheme:       stateDb.Database().TrieDB().Scheme(),
 	}
 	if maxResults > AccountRangeMaxResults || maxResults <= 0 {
 		opts.Max = AccountRangeMaxResults
@@ -445,4 +448,118 @@ func (api *DebugAPI) GetTrieFlushInterval() (string, error) {
 		return "", errors.New("trie flush interval is undefined for path-based scheme")
 	}
 	return api.eth.blockchain.GetTrieFlushInterval().String(), nil
+}
+
+// StateSize returns the current state size statistics from the state size tracker.
+// Returns an error if the state size tracker is not initialized or if stats are not ready.
+func (api *DebugAPI) StateSize(blockHashOrNumber *rpc.BlockNumberOrHash) (interface{}, error) {
+	sizer := api.eth.blockchain.StateSizer()
+	if sizer == nil {
+		return nil, errors.New("state size tracker is not enabled")
+	}
+	var (
+		err   error
+		stats *state.SizeStats
+	)
+	if blockHashOrNumber == nil {
+		stats, err = sizer.Query(nil)
+	} else {
+		header, herr := api.eth.APIBackend.HeaderByNumberOrHash(context.Background(), *blockHashOrNumber)
+		if herr != nil || header == nil {
+			return nil, fmt.Errorf("block %s is unknown", blockHashOrNumber)
+		}
+		stats, err = sizer.Query(&header.Root)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if stats == nil {
+		var s string
+		if blockHashOrNumber == nil {
+			s = "chain head"
+		} else {
+			s = blockHashOrNumber.String()
+		}
+		return nil, fmt.Errorf("state size of %s is not available", s)
+	}
+	return map[string]interface{}{
+		"stateRoot":            stats.StateRoot,
+		"blockNumber":          hexutil.Uint64(stats.BlockNumber),
+		"accounts":             hexutil.Uint64(stats.Accounts),
+		"accountBytes":         hexutil.Uint64(stats.AccountBytes),
+		"storages":             hexutil.Uint64(stats.Storages),
+		"storageBytes":         hexutil.Uint64(stats.StorageBytes),
+		"accountTrienodes":     hexutil.Uint64(stats.AccountTrienodes),
+		"accountTrienodeBytes": hexutil.Uint64(stats.AccountTrienodeBytes),
+		"storageTrienodes":     hexutil.Uint64(stats.StorageTrienodes),
+		"storageTrienodeBytes": hexutil.Uint64(stats.StorageTrienodeBytes),
+		"contractCodes":        hexutil.Uint64(stats.ContractCodes),
+		"contractCodeBytes":    hexutil.Uint64(stats.ContractCodeBytes),
+	}, nil
+}
+
+func (api *DebugAPI) ExecutionWitness(bn rpc.BlockNumber) (*stateless.ExtWitness, error) {
+	bc := api.eth.blockchain
+	block, err := api.eth.APIBackend.BlockByNumber(context.Background(), bn)
+	if err != nil {
+		return &stateless.ExtWitness{}, fmt.Errorf("block number %v not found", bn)
+	}
+
+	parent := bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
+	if parent == nil {
+		return &stateless.ExtWitness{}, fmt.Errorf("block number %v found, but parent missing", bn)
+	}
+
+	result, err := bc.ProcessBlock(parent.Root, block, false, true, false, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Witness().ToExtWitness(), nil
+}
+
+func (api *DebugAPI) ExecutionWitnessByHash(hash common.Hash) (*stateless.ExtWitness, error) {
+	bc := api.eth.blockchain
+	block := bc.GetBlockByHash(hash)
+	if block == nil {
+		return &stateless.ExtWitness{}, fmt.Errorf("block hash %x not found", hash)
+	}
+
+	parent := bc.GetHeader(block.ParentHash(), block.NumberU64()-1)
+	if parent == nil {
+		return &stateless.ExtWitness{}, fmt.Errorf("block number %x found, but parent missing", hash)
+	}
+
+	result, err := bc.ProcessBlock(parent.Root, block, false, true, false, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Witness().ToExtWitness(), nil
+}
+
+func (api *DebugAPI) GetBlockAccessList(number rpc.BlockNumberOrHash) (*bal.BlockAccessList, error) {
+	var block *types.Block
+	if num := number.BlockNumber; num != nil {
+		block = api.eth.blockchain.GetBlockByNumber(uint64(num.Int64()))
+	} else if hash := number.BlockHash; hash != nil {
+		block = api.eth.blockchain.GetBlockByHash(*hash)
+	}
+
+	if block == nil {
+		return nil, fmt.Errorf("block not found")
+	}
+	return block.Body().AccessList, nil
+}
+
+func (api *DebugAPI) GetEncodedBlockAccessList(number rpc.BlockNumberOrHash) ([]byte, error) {
+	bal, err := api.GetBlockAccessList(number)
+	if err != nil {
+		return nil, err
+	}
+	var enc bytes.Buffer
+	if err = bal.EncodeRLP(&enc); err != nil {
+		return nil, err
+	}
+	return enc.Bytes(), nil
 }
