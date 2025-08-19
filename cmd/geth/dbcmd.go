@@ -87,6 +87,7 @@ Remove blockchain and state databases`,
 			dbExportCmd,
 			dbMetadataCmd,
 			ancientInspectCmd,
+			initAncientCmd,
 			// no legacy stored receipts for bsc
 			// dbMigrateFreezerCmd,
 			dbCheckStateContentCmd,
@@ -288,6 +289,16 @@ WARNING: This is a low-level operation which may cause database corruption!`,
 		Usage: "Inspect the ancientStore information",
 		Description: `This commands will read current offset from kvdb, which is the current offset and starting BlockNumber
 of ancientStore, will also displays the reserved number of blocks in ancientStore `,
+	}
+	initAncientCmd = &cli.Command{
+		Action:    initAncient,
+		Name:      "initancient",
+		ArgsUsage: "<block-number>",
+		Flags: []cli.Flag{
+			utils.DataDirFlag,
+		},
+		Usage:       "Initialize ancient store with specified block number",
+		Description: "This command initializes the ancient store starting from the specified block number",
 	}
 	dbInspectHistoryCmd = &cli.Command{
 		Action:    inspectHistory,
@@ -1396,6 +1407,160 @@ func inspectStorage(db *triedb.Database, start uint64, end uint64, address commo
 		fmt.Printf("#%d - #%d: %s\n", from, stats.Blocks[i], content)
 		from = stats.Blocks[i]
 	}
+	return nil
+}
+
+func initAncient(ctx *cli.Context) error {
+	if ctx.NArg() != 1 {
+		return fmt.Errorf("required arguments: %v", ctx.Command.ArgsUsage)
+	}
+
+	blockNumber, err := strconv.ParseUint(ctx.Args().Get(0), 10, 64)
+	if err != nil {
+		return fmt.Errorf("failed to parse block number: %v", err)
+	}
+
+	stack, _ := makeConfigNode(ctx)
+	defer stack.Close()
+
+	log.Info("Initializing ancient store", "target_tail", blockNumber)
+
+	// First, try to open the database to check current state
+	var (
+		currentTail    uint64
+		currentHead    uint64
+		needForceReset bool
+		db             ethdb.Database
+	)
+
+	// Try to open database and get current state
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				needForceReset = true
+				log.Warn("Database panic detected, will force reset", "panic", r)
+			}
+		}()
+		
+		db = utils.MakeChainDatabase(ctx, stack, false, false)
+		if db != nil {
+			defer db.Close()
+			
+			var err error
+			currentTail, err = db.Tail()
+			if err != nil {
+				log.Warn("Failed to get current tail", "error", err)
+				needForceReset = true
+				return
+			}
+			
+			currentHead, err = db.Ancients()
+			if err != nil {
+				log.Warn("Failed to get current head", "error", err)
+				needForceReset = true
+				return
+			}
+			
+			log.Info("Current ancient store state", "tail", currentTail, "head", currentHead)
+		} else {
+			needForceReset = true
+		}
+	}()
+
+	if needForceReset {
+		log.Info("Force resetting ancient store due to database errors")
+		
+		// Only remove ancient directory if we really need to
+		ancientDir := filepath.Join(stack.ResolvePath("chaindata"), "ancient", "chain")
+		if err := os.RemoveAll(ancientDir); err != nil {
+			log.Warn("Failed to remove ancient directory", "dir", ancientDir, "error", err)
+		} else {
+			log.Info("Removed ancient directory", "dir", ancientDir)
+		}
+		
+		// Recreate the directory
+		if err := os.MkdirAll(ancientDir, 0755); err != nil {
+			return fmt.Errorf("failed to recreate ancient directory: %v", err)
+		}
+		log.Info("Recreated ancient directory", "dir", ancientDir)
+
+		// Create a fresh database
+		db = utils.MakeChainDatabase(ctx, stack, false, false)
+		if db != nil {
+			defer db.Close()
+			currentTail = 0
+			currentHead = 0
+			log.Info("Successfully created fresh ancient store", "tail", currentTail, "head", currentHead)
+		}
+	}
+
+	// Ensure database is closed before resetting metadata
+	if db != nil {
+		db.Close()
+	}
+	
+	// Now set the tail to the target block number
+	if blockNumber == currentTail {
+		log.Info("Target tail matches current tail, no changes needed", "tail", blockNumber)
+	} else if blockNumber > currentTail && !needForceReset {
+		log.Info("Moving tail forward", "current_tail", currentTail, "new_tail", blockNumber)
+		
+		if blockNumber > currentHead {
+			log.Warn("Forcing tail beyond current head - using metadata reset", 
+				"target", blockNumber, "current_head", currentHead, "gap", blockNumber-currentHead)
+			
+			// Use ResetFreezerMeta for forcing tail beyond head
+			chainFreezerDir := filepath.Join(stack.ResolvePath("chaindata"), "ancient", "chain")  
+			err := rawdb.ResetFreezerMeta(chainFreezerDir, "", blockNumber)
+			if err != nil {
+				log.Error("Failed to force set tail metadata", "error", err, "target", blockNumber)
+			} else {
+				log.Info("Successfully forced tail metadata", "new_tail", blockNumber)
+			}
+		} else {
+			// Use TruncateTail for normal forward movement within head
+			db = utils.MakeChainDatabase(ctx, stack, false, false)
+			defer db.Close()
+			
+			oldTail, err := db.TruncateTail(blockNumber)
+			if err != nil {
+				log.Error("Failed to truncate tail", "error", err, "old_tail", oldTail, "new_tail", blockNumber)
+			} else {
+				log.Info("Successfully moved tail forward", "old_tail", oldTail, "new_tail", blockNumber)
+			}
+		}
+	} else {
+		log.Info("Setting ancient store tail via metadata reset", "current_tail", currentTail, "target", blockNumber)
+		
+		// Use ResetFreezerMeta for backwards movement or fresh database
+		chainFreezerDir := filepath.Join(stack.ResolvePath("chaindata"), "ancient", "chain")  
+		err := rawdb.ResetFreezerMeta(chainFreezerDir, "", blockNumber)
+		if err != nil {
+			log.Warn("Failed to set tail metadata", "error", err, "target", blockNumber)
+		} else {
+			log.Info("Successfully set ancient store tail metadata", "new_tail", blockNumber)
+		}
+		
+		// Verify the final state
+		db = utils.MakeChainDatabase(ctx, stack, false, false)
+		defer db.Close()
+		
+		finalTail, err := db.Tail()
+		if err != nil {
+			log.Warn("Failed to verify final tail", "error", err)
+		} else {
+			finalHead, err := db.Ancients()
+			if err != nil {
+				log.Warn("Failed to verify final head", "error", err)
+			} else {
+				log.Info("Final ancient store state", "tail", finalTail, "head", finalHead)
+			}
+		}
+	}
+	
+	log.Info("Ancient store initialization completed successfully", 
+		"initial_tail", currentTail, "final_tail", blockNumber, "target", blockNumber)
+	
 	return nil
 }
 

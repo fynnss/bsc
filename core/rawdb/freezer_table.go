@@ -1339,8 +1339,9 @@ func (t *freezerTable) resetTailMeta(legacyOffset uint64) error {
 		return errors.New("resetItems in readonly mode")
 	}
 
-	// if the table enable the tail truncation, add the hidden items
-	legacyOffset += t.itemHidden.Load()
+	// Note: For initancient tool, we want to set the exact tail position
+	// Comment out the hidden items addition to allow precise control
+	// legacyOffset += t.itemHidden.Load()
 
 	// overwrite metadata file
 	t.metadata.setVirtualTail(legacyOffset, true)

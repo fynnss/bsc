@@ -99,8 +99,8 @@ func newChainFreezer(datadir string, namespace string, readonly bool, multiDatab
 	return &cf, nil
 }
 
-// resetFreezerMeta resets the tail metadata of the chain freezer.
-func resetFreezerMeta(datadir string, namespace string, legacyOffset uint64) error {
+// ResetFreezerMeta resets the tail metadata of the chain freezer.
+func ResetFreezerMeta(datadir string, namespace string, legacyOffset uint64) error {
 	if datadir == "" {
 		return nil
 	}

@@ -578,9 +578,8 @@ func (f *Freezer) resetTailMeta(legacyOffset uint64) error {
 		return nil
 	}
 
-	if f.tail.Load() > 0 {
-		return errors.New("the freezer's tail > 0, cannot reset again")
-	}
+	// Allow resetting tail even if it's already > 0 for initancient tool
+	// This is needed for force-setting tail to specific positions
 	f.writeLock.Lock()
 	defer f.writeLock.Unlock()
 	for _, t := range f.tables {
