@@ -146,7 +146,6 @@ var (
 		utils.MinerRecommitIntervalFlag,
 		utils.MinerNewPayloadTimeoutFlag, // deprecated
 		utils.MinerDelayLeftoverFlag,
-		utils.EnableBALFlag,
 		// utils.MinerNewPayloadTimeout,
 		utils.NATFlag,
 		utils.NoDiscoverFlag,
