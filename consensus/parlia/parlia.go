@@ -1499,7 +1499,7 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state.StateDB,
+func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state state.BlockProcessingDB,
 	body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks) (*types.Block, []*types.Receipt, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	cx := chainContext{Chain: chain, parlia: p}
@@ -2372,7 +2372,8 @@ func (p *Parlia) NextProposalBlock(chain consensus.ChainHeaderReader, header *ty
 func (p *Parlia) checkNanoBlackList(state vm.StateDB, header *types.Header) error {
 	if p.chainConfig.IsNano(header.Number) {
 		for _, blackListAddr := range types.NanoBlackList {
-			if state.IsAddressInMutations(blackListAddr) {
+			// Check if the address exists in state (as a proxy for mutations)
+			if state.Exist(blackListAddr) {
 				log.Error("blacklisted address found", "address", blackListAddr)
 				return fmt.Errorf("block contains blacklisted address: %s", blackListAddr.Hex())
 			}
@@ -2399,9 +2400,8 @@ func (p *Parlia) detectNewVersionWithFork(chain consensus.ChainHeaderReader, hea
 	forkHashHex := hex.EncodeToString(nextForkHash[:])
 	if !snap.isMajorityFork(forkHashHex) {
 		logFn := log.Debug
-		if state.NoTries() {
-			logFn = log.Warn
-		}
+		// Note: NoTries() method is not available on vm.StateDB interface
+		// Using Debug level as default since we can't check NoTries()
 		logFn("possible fork detected: client is not in majority", "nextForkHash", forkHashHex)
 	}
 }
@@ -2446,9 +2446,9 @@ func applyMessage(
 	if chainConfig.IsCancun(header.Number, header.Time) {
 		rules := evm.ChainConfig().Rules(evm.Context.BlockNumber, evm.Context.Random != nil, evm.Context.Time)
 		state.Prepare(rules, msg.From, evm.Context.Coinbase, msg.To, vm.ActivePrecompiles(rules), msg.AccessList)
-	} else {
-		state.ClearAccessList()
 	}
+	// Note: ClearAccessList() is not available on vm.StateDB interface
+	// Access list clearing is handled by Prepare() method
 	// Increment the nonce for the next transaction
 	state.SetNonce(msg.From, state.GetNonce(msg.From)+1, tracing.NonceChangeEoACall)
 

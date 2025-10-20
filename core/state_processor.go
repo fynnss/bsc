@@ -19,9 +19,10 @@ package core
 import (
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/types/bal"
 	"math/big"
 	"time"
+
+	"github.com/ethereum/go-ethereum/core/types/bal"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus"
@@ -307,7 +308,7 @@ func ProcessBeaconBlockRoot(beaconRoot common.Hash, evm *vm.EVM) (*bal.StateDiff
 	// Return immediately if beaconRoot equals the zero hash when using the Parlia engine.
 	if beaconRoot == (common.Hash{}) {
 		if chainConfig := evm.ChainConfig(); chainConfig != nil && chainConfig.Parlia != nil {
-			return
+			return &bal.StateDiff{make(map[common.Address]*bal.AccountState)}, &bal.StateAccesses{}
 		}
 	}
 	if tracer := evm.Config.Tracer; tracer != nil {

@@ -2375,7 +2375,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *ethconfig.Config) {
 	}
 
 	cfg.ExperimentalBAL = ctx.Bool(ExperimentalBALFlag.Name)
-}
 
 	// Download and merge incremental snapshot config
 	if ctx.IsSet(UseRemoteIncrSnapshotFlag.Name) {

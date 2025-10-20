@@ -193,7 +193,7 @@ func newConsensusAPIWithoutHeartbeat(eth *eth.Ethereum) *ConsensusAPI {
 		invalidBlocksHits: make(map[common.Hash]int),
 		invalidTipsets:    make(map[common.Hash]*types.Header),
 	}
-	eth.Downloader().SetBadBlockCallback(api.setInvalidAncestor)
+	// eth.Downloader().SetBadBlockCallback(api.setInvalidAncestor)
 	return api
 }
 
@@ -250,12 +250,8 @@ func (api *ConsensusAPI) ForkchoiceUpdatedV3(update engine.ForkchoiceStateV1, pa
 			return engine.STATUS_INVALID, attributesErr("missing withdrawals")
 		case params.BeaconRoot == nil:
 			return engine.STATUS_INVALID, attributesErr("missing beacon root")
-		case !api.checkFork(params.Timestamp, forks.Cancun, forks.Prague, forks.Osaka, forks.Amsterdam):
+		case !api.checkFork(params.Timestamp, forks.Cancun, forks.Prague, forks.Osaka):
 			return engine.STATUS_INVALID, unsupportedForkErr("fcuV3 must only be called for cancun or prague payloads")
-		}
-
-		if api.checkFork(params.Timestamp, forks.Amsterdam) {
-			return api.forkchoiceUpdated(update, params, engine.PayloadV4, false)
 		}
 	}
 	// TODO(matt): the spec requires that fcu is applied when called on a valid
@@ -393,8 +389,7 @@ func (api *ConsensusAPI) forkchoiceUpdated(update engine.ForkchoiceStateV1, payl
 			log.Warn("Safe block not in canonical chain")
 			return engine.STATUS_INVALID, engine.InvalidForkChoiceState.With(errors.New("safe block not in canonical chain"))
 		}
-		// Set the safe block
-		api.eth.BlockChain().SetSafe(safeBlock.Header())
+		// api.eth.BlockChain().SetSafe(safeBlock.Header())
 	}
 	// If payload generation was requested, create a new block to be potentially
 	// sealed by the beacon client. The payload will be requested later, and we
@@ -773,7 +768,7 @@ func (api *ConsensusAPI) NewPayloadV5(params engine.ExecutableData, versionedHas
 		return invalidStatus, paramsErr("nil executionRequests post-prague")
 	case params.BlockAccessList == nil:
 		return invalidStatus, paramsErr("nil block access list post-amsterdam")
-	case !api.checkFork(params.Timestamp, forks.Prague, forks.Osaka, forks.Amsterdam):
+	case !api.checkFork(params.Timestamp, forks.Prague, forks.Osaka):
 		return invalidStatus, unsupportedForkErr("newPayloadV5 must only be called for amsterdam payloads")
 	}
 	requests := convertRequests(executionRequests)

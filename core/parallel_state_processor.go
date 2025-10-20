@@ -3,7 +3,11 @@ package core
 import (
 	"cmp"
 	"fmt"
+	"slices"
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -11,8 +15,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/params"
 	"golang.org/x/sync/errgroup"
-	"slices"
-	"time"
 )
 
 // ProcessResultWithMetrics wraps ProcessResult with some metrics that are
@@ -120,7 +122,27 @@ func (p *ParallelStateProcessor) prepareExecResult(block *types.Block, allStateR
 	}
 
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.chain.engine.Finalize(p.chain, header, tracingStateDB, &commonTxs, block.Uncles(), block.Withdrawals(), &receipts, &systemTxs, usedGas, cfg.Tracer)
+	// Classify transactions into common and system transactions
+	posa, isPoSA := p.chain.engine.(consensus.PoSA)
+	commonTxs := make([]*types.Transaction, 0, len(block.Transactions()))
+	systemTxs := make([]*types.Transaction, 0, 2) // usually 2 system txs: validator set + system reward
+
+	for _, tx := range block.Transactions() {
+		if isPoSA {
+			if isSystemTx, err := posa.IsSystemTransaction(tx, block.Header()); err != nil {
+				return &ProcessResultWithMetrics{
+					ProcessResult: &ProcessResult{Error: fmt.Errorf("could not check if tx is system tx [%v]: %w", tx.Hash().Hex(), err)},
+				}
+			} else if isSystemTx {
+				systemTxs = append(systemTxs, tx)
+				continue
+			}
+		}
+		commonTxs = append(commonTxs, tx)
+	}
+
+	var usedGas uint64 = cumulativeGasUsed
+	p.chain.engine.Finalize(p.chain, header, tracingStateDB, &commonTxs, block.Uncles(), block.Withdrawals(), (*[]*types.Receipt)(&receipts), &systemTxs, &usedGas, cfg.Tracer)
 	// invoke Finalise so that withdrawals are accounted for in the state diff
 	finalDiff, finalAccesses := postTxState.Finalise(true)
 	computedDiff.Merge(finalDiff)

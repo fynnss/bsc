@@ -1011,7 +1011,7 @@ func (api *API) TraceTransaction(ctx context.Context, hash common.Hash, config *
 		TxIndex:     int(index),
 		TxHash:      hash,
 	}
-	return api.traceTx(ctx, tx, msg, txctx, vmctx, statedb, config, nil)
+	return api.traceTx(ctx, tx, msg, txctx, vmctx, statedb, config, false, nil)
 }
 
 // TraceCall lets you trace a given eth_call. It collects the structured logs

@@ -185,7 +185,7 @@ func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
 	if miner.worker.isRunning() {
 		pendingBlock, pendingReceipts, pendingState := miner.worker.pending()
 		if pendingState != nil && pendingBlock != nil {
-			return pendingBlock, pendingReceipts, pendingState
+			return pendingBlock, pendingReceipts, pendingState.(*state.StateDB)
 		}
 	}
 	// fallback to latest block
@@ -197,7 +197,7 @@ func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
 	if err != nil {
 		return nil, nil, nil
 	}
-	return miner.worker.chain.GetBlockByHash(block.Hash()), miner.worker.chain.GetReceiptsByHash(block.Hash()), stateDb.(*state.StateDB)
+	return miner.worker.chain.GetBlockByHash(block.Hash()), miner.worker.chain.GetReceiptsByHash(block.Hash()), stateDb
 }
 
 // SetExtra sets the content used to initialize the block extra field.
