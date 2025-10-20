@@ -233,9 +233,10 @@ type BlockHeadersRLPPacket struct {
 
 // NewBlockPacket is the network packet for the block propagation message.
 type NewBlockPacket struct {
-	Block    *types.Block
-	TD       *big.Int
-	Sidecars types.BlobSidecars `rlp:"optional"`
+	Block           *types.Block
+	TD              *big.Int
+	Sidecars        types.BlobSidecars           `rlp:"optional"`
+	BlockAccessList *types.BlockAccessListEncode `rlp:"optional"`
 }
 
 // sanityCheck verifies that the values are reasonable, as a DoS protection

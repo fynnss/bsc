@@ -1246,7 +1246,16 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts, nil)
 	if w.chainConfig.IsEnableBAL() {
 		body := block.Body()
-		body.AccessList = work.state.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+		body.AccessList = &types.BlockAccessListEncode{
+			Version:    0,
+			Number:     block.NumberU64(),
+			Hash:       block.Hash(),
+			AccessList: work.state.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj(),
+		}
+
+		if err := w.engine.SignBAL(body.AccessList); err != nil {
+			return &newPayloadResult{err: err}
+		}
 		block = block.WithBody(*body)
 	}
 	if err != nil {

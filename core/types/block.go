@@ -137,8 +137,6 @@ type Header struct {
 
 	// RequestsHash was added by EIP-7685 and is ignored in legacy headers.
 	RequestsHash *common.Hash `json:"requestsHash" rlp:"optional"`
-
-	BlockAccessListHash *common.Hash `json:"balHash" rlp:"optional"`
 }
 
 // field type overrides for gencodec
@@ -235,8 +233,8 @@ func (h *Header) EmptyWithdrawalsHash() bool {
 type Body struct {
 	Transactions []*Transaction
 	Uncles       []*Header
-	Withdrawals  []*Withdrawal        `rlp:"optional"`
-	AccessList   *bal.BlockAccessList `rlp:"optional,nil"`
+	Withdrawals  []*Withdrawal          `rlp:"optional"`
+	AccessList   *BlockAccessListEncode `rlp:"optional,nil"`
 }
 
 // Block represents an Ethereum block.
@@ -267,8 +265,6 @@ type Block struct {
 	// that process it.
 	witness *ExecutionWitness
 
-	accessList *bal.BlockAccessList
-
 	// caches
 	hash atomic.Pointer[common.Hash]
 	size atomic.Uint64
@@ -280,6 +276,10 @@ type Block struct {
 
 	// sidecars provides DA check
 	sidecars BlobSidecars
+
+	// bal provides block access list
+	accessList     *BlockAccessListEncode
+	accessListSize atomic.Uint64
 }
 
 // "external" block encoding. used for eth protocol, etc.
@@ -287,8 +287,8 @@ type extblock struct {
 	Header      *Header
 	Txs         []*Transaction
 	Uncles      []*Header
-	Withdrawals []*Withdrawal        `rlp:"optional"`
-	BAL         *bal.BlockAccessList `rlp:"optional"`
+	Withdrawals []*Withdrawal          `rlp:"optional"`
+	AccessList  *BlockAccessListEncode `rlp:"optional"`
 }
 
 // NewBlock creates a new block. The input data is copied, changes to header and to the
@@ -350,8 +350,6 @@ func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher
 	}
 
 	if body.AccessList != nil {
-		balHash := body.AccessList.Hash()
-		b.header.BlockAccessListHash = &balHash
 		b.accessList = body.AccessList
 	}
 
@@ -407,7 +405,7 @@ func (b *Block) DecodeRLP(s *rlp.Stream) error {
 		fmt.Println("error here")
 		return err
 	}
-	b.header, b.uncles, b.transactions, b.withdrawals, b.accessList = eb.Header, eb.Uncles, eb.Txs, eb.Withdrawals, eb.BAL
+	b.header, b.uncles, b.transactions, b.withdrawals, b.accessList = eb.Header, eb.Uncles, eb.Txs, eb.Withdrawals, eb.AccessList
 
 	// TODO: ensure that BAL is accounted for in size
 	b.size.Store(rlp.ListSize(size))
@@ -421,7 +419,7 @@ func (b *Block) EncodeRLP(w io.Writer) error {
 		Txs:         b.transactions,
 		Uncles:      b.uncles,
 		Withdrawals: b.withdrawals,
-		BAL:         b.accessList,
+		AccessList:  b.accessList,
 	})
 }
 
@@ -434,9 +432,10 @@ func (b *Block) Body() *Body {
 // Accessors for body data. These do not return a copy because the content
 // of the body slices does not affect the cached hash/size in block.
 
-func (b *Block) Uncles() []*Header          { return b.uncles }
-func (b *Block) Transactions() Transactions { return b.transactions }
-func (b *Block) Withdrawals() Withdrawals   { return b.withdrawals }
+func (b *Block) Uncles() []*Header                  { return b.uncles }
+func (b *Block) Transactions() Transactions         { return b.transactions }
+func (b *Block) Withdrawals() Withdrawals           { return b.withdrawals }
+func (b *Block) AccessList() *BlockAccessListEncode { return b.accessList }
 
 func (b *Block) Transaction(hash common.Hash) *Transaction {
 	for _, transaction := range b.transactions {
@@ -512,6 +511,19 @@ func (b *Block) Size() uint64 {
 	c := writeCounter(0)
 	rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
+	return uint64(c)
+}
+
+func (b *Block) AccessListSize() uint64 {
+	if b.accessList == nil {
+		return 0
+	}
+	if size := b.accessListSize.Load(); size > 0 {
+		return size
+	}
+	c := writeCounter(0)
+	rlp.Encode(&c, b.accessList)
+	b.accessListSize.Store(uint64(c))
 	return uint64(c)
 }
 
@@ -598,7 +610,7 @@ func (b *Block) WithBody(body Body) *Block {
 	}
 	if body.AccessList != nil {
 		balCopy := body.AccessList.Copy()
-		block.accessList = &balCopy
+		block.accessList = balCopy
 	}
 	for i := range body.Uncles {
 		block.uncles[i] = CopyHeader(body.Uncles[i])
@@ -619,6 +631,20 @@ func (b *Block) WithWithdrawals(withdrawals []*Withdrawal) *Block {
 		block.withdrawals = make([]*Withdrawal, len(withdrawals))
 		copy(block.withdrawals, withdrawals)
 	}
+	return block
+}
+
+// WithAccessList returns a block containing the given access list.
+func (b *Block) WithAccessList(accessList *BlockAccessListEncode) *Block {
+	block := &Block{
+		header:       b.header,
+		transactions: b.transactions,
+		uncles:       b.uncles,
+		withdrawals:  b.withdrawals,
+		witness:      b.witness,
+		sidecars:     b.sidecars,
+	}
+	block.accessList = accessList
 	return block
 }
 
@@ -724,5 +750,24 @@ func EncodeSigHeader(w io.Writer, header *Header, chainId *big.Int) {
 	err := rlp.Encode(w, toEncode)
 	if err != nil {
 		panic("can't encode: " + err.Error())
+	}
+}
+
+type BlockAccessListEncode struct {
+	Version    uint32               // Version of the access list format
+	Number     uint64               // number of the block that the BAL is for
+	Hash       common.Hash          // hash of the block that the BAL is for
+	SignData   []byte               // sign data for BAL
+	AccessList *bal.BlockAccessList // encoded access list
+}
+
+func (b *BlockAccessListEncode) Copy() *BlockAccessListEncode {
+	accessListCopy := b.AccessList.Copy()
+	return &BlockAccessListEncode{
+		Version:    b.Version,
+		Number:     b.Number,
+		Hash:       b.Hash,
+		SignData:   b.SignData,
+		AccessList: &accessListCopy,
 	}
 }

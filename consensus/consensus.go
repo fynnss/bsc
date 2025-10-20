@@ -141,6 +141,12 @@ type Engine interface {
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time uint64, parent *types.Header) *big.Int
 
+	// SignBAL signs the BAL of the block
+	SignBAL(blockAccessList *types.BlockAccessListEncode) error
+
+	// VerifyBAL verifies the BAL of the block
+	VerifyBAL(block *types.Block, bal *types.BlockAccessListEncode) error
+
 	// Delay returns the max duration the miner can commit txs
 	Delay(chain ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration
 

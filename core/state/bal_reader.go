@@ -3,14 +3,15 @@ package state
 import (
 	"context"
 	"fmt"
+	"sync"
+	"time"
+
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/types/bal"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
-	"sync"
-	"time"
 )
 
 // TODO: probably unnecessary to cache the resolved state object here as it will already be in the db cache?
@@ -150,7 +151,7 @@ type BALReader struct {
 // NewBALReader constructs a new reader from an access list. db is expected to have been instantiated with a reader.
 func NewBALReader(block *types.Block, db *StateDB) *BALReader {
 	r := &BALReader{accesses: make(map[common.Address]*bal.AccountAccess), block: block}
-	for _, acctDiff := range *block.Body().AccessList {
+	for _, acctDiff := range *block.Body().AccessList.AccessList {
 		r.accesses[acctDiff.Address] = &acctDiff
 	}
 	r.prestateReader.resolve(db.Reader(), r.ModifiedAccounts())

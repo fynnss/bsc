@@ -46,6 +46,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/systemcontracts"
 	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/core/types/bal"
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -416,6 +417,16 @@ type BlockChain struct {
 
 	// monitor
 	doubleSignMonitor *monitor.DoubleSignMonitor
+}
+
+// SignBAL implements consensus.ChainHeaderReader.
+func (bc *BlockChain) SignBAL(blockAccessList *bal.BlockAccessList) error {
+	panic("unimplemented")
+}
+
+// VerifyBAL implements consensus.ChainHeaderReader.
+func (bc *BlockChain) VerifyBAL(block *types.Block, bal *bal.BlockAccessList) error {
+	panic("unimplemented")
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -2633,7 +2644,10 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 			existingBody := block.Body()
 			block = block.WithBody(*existingBody)
 			existingBody = block.Body()
-			existingBody.AccessList = sdb.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+			accessList := sdb.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+			existingBody.AccessList = &types.BlockAccessListEncode{
+				AccessList: accessList,
+			}
 			block = block.WithBody(*existingBody)
 		}
 	}

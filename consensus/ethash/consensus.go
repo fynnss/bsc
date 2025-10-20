@@ -609,3 +609,11 @@ func accumulateRewards(config *params.ChainConfig, stateDB vm.StateDB, header *t
 	}
 	stateDB.AddBalance(header.Coinbase, reward, tracing.BalanceIncreaseRewardMineBlock)
 }
+
+func (ethash *Ethash) SignBAL(blockAccessList *types.BlockAccessListEncode) error {
+	return nil
+}
+
+func (ethash *Ethash) VerifyBAL(block *types.Block, blockAccessList *types.BlockAccessListEncode) error {
+	return nil
+}

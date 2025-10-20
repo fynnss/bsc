@@ -18,11 +18,10 @@ package engine
 
 import (
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/types/bal"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
 	"math/big"
 	"slices"
+
+	"github.com/ethereum/go-ethereum/core/types/bal"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -279,38 +278,32 @@ func ExecutableDataToBlockNoHash(data ExecutableData, versionedHashes []common.H
 		requestsHash = &h
 	}
 
-	var blockAccessListHash *common.Hash
 	body := types.Body{Transactions: txs, Uncles: nil, Withdrawals: data.Withdrawals}
 	if data.BlockAccessList != nil {
-		body.AccessList = data.BlockAccessList
-		// Calculate the hash of the RLP-encoded BAL
-		rlpBytes, _ := rlp.EncodeToBytes(data.BlockAccessList)
-		h := crypto.Keccak256Hash(rlpBytes)
-		blockAccessListHash = &h
+		body.AccessList.AccessList = data.BlockAccessList
 	}
 
 	header := &types.Header{
-		ParentHash:          data.ParentHash,
-		UncleHash:           types.EmptyUncleHash,
-		Coinbase:            data.FeeRecipient,
-		Root:                data.StateRoot,
-		TxHash:              types.DeriveSha(types.Transactions(txs), trie.NewStackTrie(nil)),
-		ReceiptHash:         data.ReceiptsRoot,
-		Bloom:               types.BytesToBloom(data.LogsBloom),
-		Difficulty:          common.Big0,
-		Number:              new(big.Int).SetUint64(data.Number),
-		GasLimit:            data.GasLimit,
-		GasUsed:             data.GasUsed,
-		Time:                data.Timestamp,
-		BaseFee:             data.BaseFeePerGas,
-		Extra:               data.ExtraData,
-		MixDigest:           data.Random,
-		WithdrawalsHash:     withdrawalsRoot,
-		ExcessBlobGas:       data.ExcessBlobGas,
-		BlobGasUsed:         data.BlobGasUsed,
-		ParentBeaconRoot:    beaconRoot,
-		RequestsHash:        requestsHash,
-		BlockAccessListHash: blockAccessListHash,
+		ParentHash:       data.ParentHash,
+		UncleHash:        types.EmptyUncleHash,
+		Coinbase:         data.FeeRecipient,
+		Root:             data.StateRoot,
+		TxHash:           types.DeriveSha(types.Transactions(txs), trie.NewStackTrie(nil)),
+		ReceiptHash:      data.ReceiptsRoot,
+		Bloom:            types.BytesToBloom(data.LogsBloom),
+		Difficulty:       common.Big0,
+		Number:           new(big.Int).SetUint64(data.Number),
+		GasLimit:         data.GasLimit,
+		GasUsed:          data.GasUsed,
+		Time:             data.Timestamp,
+		BaseFee:          data.BaseFeePerGas,
+		Extra:            data.ExtraData,
+		MixDigest:        data.Random,
+		WithdrawalsHash:  withdrawalsRoot,
+		ExcessBlobGas:    data.ExcessBlobGas,
+		BlobGasUsed:      data.BlobGasUsed,
+		ParentBeaconRoot: beaconRoot,
+		RequestsHash:     requestsHash,
 	}
 	return types.NewBlockWithHeader(header).
 			WithBody(body).
@@ -340,7 +333,7 @@ func BlockToExecutableData(block *types.Block, fees *big.Int, sidecars []*types.
 		BlobGasUsed:      block.BlobGasUsed(),
 		ExcessBlobGas:    block.ExcessBlobGas(),
 		ExecutionWitness: block.ExecutionWitness(),
-		BlockAccessList:  block.Body().AccessList,
+		BlockAccessList:  block.Body().AccessList.AccessList,
 	}
 
 	// Add blobs.

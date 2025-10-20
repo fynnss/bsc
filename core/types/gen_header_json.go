@@ -62,7 +62,6 @@ func (h Header) MarshalJSON() ([]byte, error) {
 	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
 	enc.ParentBeaconRoot = h.ParentBeaconRoot
 	enc.RequestsHash = h.RequestsHash
-	enc.BlockAccessListHash = h.BlockAccessListHash
 	enc.Hash = h.Hash()
 	return json.Marshal(&enc)
 }
@@ -171,9 +170,6 @@ func (h *Header) UnmarshalJSON(input []byte) error {
 	}
 	if dec.RequestsHash != nil {
 		h.RequestsHash = dec.RequestsHash
-	}
-	if dec.BlockAccessListHash != nil {
-		h.BlockAccessListHash = dec.BlockAccessListHash
 	}
 	return nil
 }

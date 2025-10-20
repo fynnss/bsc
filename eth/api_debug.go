@@ -477,7 +477,7 @@ func (api *DebugAPI) GetBlockAccessList(number rpc.BlockNumberOrHash) (*bal.Bloc
 	if block == nil {
 		return nil, fmt.Errorf("block not found")
 	}
-	return block.Body().AccessList, nil
+	return block.Body().AccessList.AccessList, nil
 }
 
 func (api *DebugAPI) GetEncodedBlockAccessList(number rpc.BlockNumberOrHash) ([]byte, error) {

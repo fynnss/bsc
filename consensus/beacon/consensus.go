@@ -429,7 +429,10 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 
 	// embed the block access list in the body
 	if chain.Config().IsEnableBAL() {
-		body.AccessList = state.(*state2.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+		accessList := state.(*state2.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
+		body.AccessList = &types.BlockAccessListEncode{
+			AccessList: accessList,
+		}
 	}
 
 	// Assemble the final block.
@@ -546,4 +549,12 @@ func IsTTDReached(chain consensus.ChainHeaderReader, parentHash common.Hash, par
 		return false, consensus.ErrUnknownAncestor
 	}
 	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil
+}
+
+func (beacon *Beacon) SignBAL(blockAccessList *types.BlockAccessListEncode) error {
+	return nil
+}
+
+func (beacon *Beacon) VerifyBAL(block *types.Block, blockAccessList *types.BlockAccessListEncode) error {
+	return nil
 }
