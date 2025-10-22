@@ -2366,7 +2366,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		start := time.Now()
 		// construct or verify block access lists if BALs are enabled and
 		// we are post-selfdestruct removal fork.
-		enableBAL := bc.cfg.EnableBAL && bc.chainConfig.IsCancun(block.Number(), block.Time())
+		enableBAL := bc.cfg.EnableBAL
 		blockHasAccessList := block.Body().AccessList != nil
 		makeBAL := enableBAL && !blockHasAccessList
 		validateBAL := enableBAL && blockHasAccessList
