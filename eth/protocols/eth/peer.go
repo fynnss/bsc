@@ -324,9 +324,10 @@ func (p *Peer) SendNewBlock(block *types.Block, td *big.Int) error {
 			"txNum", len(block.Transactions()), "canHandleBAL", p.CanHandleBAL.Load())
 	}
 	return p2p.Send(p.rw, NewBlockMsg, &NewBlockPacket{
-		Block:    block,
-		TD:       td,
-		Sidecars: block.Sidecars(),
+		Block:           block,
+		TD:              td,
+		Sidecars:        block.Sidecars(),
+		BlockAccessList: accessList,
 	})
 }
 
