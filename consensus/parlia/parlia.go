@@ -86,7 +86,7 @@ const (
 	// `finalityRewardInterval` should be smaller than `inMemorySnapshots`, otherwise, it will result in excessive computation.
 	finalityRewardInterval = 200
 
-	kAncestorGenerationDepth = 2
+	kAncestorGenerationDepth = 3
 )
 
 var (
@@ -1103,7 +1103,7 @@ func (p *Parlia) assembleVoteAttestation(chain consensus.ChainHeaderReader, head
 	// Validate vote data consistency
 	for _, vote := range votes {
 		if vote.Data.Hash() != attestation.Data.Hash() {
-			return fmt.Errorf("vote check error, expected: %v, real: %v", attestation.Data, vote)
+			return fmt.Errorf("vote check error, expected: %v, real: %v", attestation.Data, vote.Data)
 		}
 	}
 	// Prepare aggregated vote signature
@@ -1742,12 +1742,20 @@ func (p *Parlia) Authorize(val common.Address, signFn SignerFn, signTxFn SignerT
 
 // Argument leftOver is the time reserved for block finalize(calculate root, distribute income...)
 func (p *Parlia) Delay(chain consensus.ChainReader, header *types.Header, leftOver *time.Duration) *time.Duration {
-	number := header.Number.Uint64()
-	snap, err := p.snapshot(chain, number-1, header.ParentHash, nil)
+	snap, err := p.snapshot(chain, header.Number.Uint64()-1, header.ParentHash, nil)
 	if err != nil {
 		return nil
 	}
+
 	delay := p.delayForRamanujanFork(snap, header)
+	// The blocking time should be no more than half of period when snap.TurnLength == 1
+	timeForMining := time.Duration(snap.BlockInterval) * time.Millisecond / 2
+	if !snap.lastBlockInOneTurn(header.Number.Uint64()) {
+		timeForMining = time.Duration(snap.BlockInterval) * time.Millisecond
+	}
+	if delay > timeForMining {
+		delay = timeForMining
+	}
 
 	if *leftOver >= time.Duration(snap.BlockInterval)*time.Millisecond {
 		// ignore invalid leftOver
@@ -1759,14 +1767,6 @@ func (p *Parlia) Delay(chain consensus.ChainReader, header *types.Header, leftOv
 		delay = delay - *leftOver
 	}
 
-	// The blocking time should be no more than half of period when snap.TurnLength == 1
-	timeForMining := time.Duration(snap.BlockInterval) * time.Millisecond / 2
-	if !snap.lastBlockInOneTurn(header.Number.Uint64()) {
-		timeForMining = time.Duration(snap.BlockInterval) * time.Millisecond
-	}
-	if delay > timeForMining {
-		delay = timeForMining
-	}
 	return &delay
 }
 
@@ -1819,7 +1819,7 @@ func (p *Parlia) Seal(chain consensus.ChainHeaderReader, block *types.Block, res
 		if err != nil {
 			/* If the vote attestation can't be assembled successfully, the blockchain won't get
 			   fast finalized, but it can be tolerated, so just report this error here. */
-			log.Error("Assemble vote attestation failed when sealing", "err", err)
+			log.Debug("Assemble vote attestation failed when sealing", "err", err)
 		}
 
 		// Sign all the things!
