@@ -203,6 +203,11 @@ func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	}
 	sidecars := rawdb.ReadBlobSidecars(bc.db, hash, number)
 	block = block.WithSidecars(sidecars)
+
+	blockAccessList := rawdb.ReadBlockAccessList(bc.db, hash, number)
+	if blockAccessList != nil {
+		block = block.WithAccessList(blockAccessList)
+	}
 	// Cache the found block for next time and return
 	bc.blockCache.Add(block.Hash(), block)
 	return block

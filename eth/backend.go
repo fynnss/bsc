@@ -447,6 +447,7 @@ func New(stack *node.Node, config *ethconfig.Config) (*Ethereum, error) {
 		DisablePeerTxBroadcast:    config.DisablePeerTxBroadcast,
 		PeerSet:                   newPeerSet(),
 		EnableQuickBlockFetching:  stack.Config().EnableQuickBlockFetching,
+		EnableBAL:                 config.ExperimentalBAL,
 	}); err != nil {
 		return nil, err
 	}

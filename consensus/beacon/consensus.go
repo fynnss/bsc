@@ -406,9 +406,9 @@ func (beacon *Beacon) Finalize(chain consensus.ChainHeaderReader, header *types.
 
 // FinalizeAndAssemble implements consensus.Engine, setting the final state and
 // assembling the block.
-func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state state2.BlockProcessingDB, body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks) (*types.Block, []*types.Receipt, error) {
+func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state *state2.StateDB, body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks, onFinalization func()) (*types.Block, []*types.Receipt, error) {
 	if !beacon.IsPoSHeader(header) {
-		return beacon.ethone.FinalizeAndAssemble(chain, header, state, body, receipts, tracer)
+		return beacon.ethone.FinalizeAndAssemble(chain, header, state, body, receipts, tracer, onFinalization)
 	}
 	shanghai := chain.Config().IsShanghai(header.Number, header.Time)
 	if shanghai {
@@ -427,12 +427,8 @@ func (beacon *Beacon) FinalizeAndAssemble(chain consensus.ChainHeaderReader, hea
 	// Assign the final state root to header.
 	header.Root = state.IntermediateRoot(true)
 
-	// embed the block access list in the body
-	if chain.Config().IsEnableBAL() {
-		accessList := state.(*state2.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
-		body.AccessList = &types.BlockAccessListEncode{
-			AccessList: accessList,
-		}
+	if onFinalization != nil {
+		onFinalization()
 	}
 
 	// Assemble the final block.

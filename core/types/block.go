@@ -233,8 +233,7 @@ func (h *Header) EmptyWithdrawalsHash() bool {
 type Body struct {
 	Transactions []*Transaction
 	Uncles       []*Header
-	Withdrawals  []*Withdrawal          `rlp:"optional"`
-	AccessList   *BlockAccessListEncode `rlp:"optional,nil"`
+	Withdrawals  []*Withdrawal `rlp:"optional"`
 }
 
 // Block represents an Ethereum block.
@@ -287,8 +286,7 @@ type extblock struct {
 	Header      *Header
 	Txs         []*Transaction
 	Uncles      []*Header
-	Withdrawals []*Withdrawal          `rlp:"optional"`
-	AccessList  *BlockAccessListEncode `rlp:"optional"`
+	Withdrawals []*Withdrawal `rlp:"optional"`
 }
 
 // NewBlock creates a new block. The input data is copied, changes to header and to the
@@ -349,10 +347,6 @@ func NewBlock(header *Header, body *Body, receipts []*Receipt, hasher TrieHasher
 		b.withdrawals = slices.Clone(withdrawals)
 	}
 
-	if body.AccessList != nil {
-		b.accessList = body.AccessList
-	}
-
 	return b
 }
 
@@ -405,7 +399,7 @@ func (b *Block) DecodeRLP(s *rlp.Stream) error {
 		fmt.Println("error here")
 		return err
 	}
-	b.header, b.uncles, b.transactions, b.withdrawals, b.accessList = eb.Header, eb.Uncles, eb.Txs, eb.Withdrawals, eb.AccessList
+	b.header, b.uncles, b.transactions, b.withdrawals = eb.Header, eb.Uncles, eb.Txs, eb.Withdrawals
 
 	// TODO: ensure that BAL is accounted for in size
 	b.size.Store(rlp.ListSize(size))
@@ -419,14 +413,13 @@ func (b *Block) EncodeRLP(w io.Writer) error {
 		Txs:         b.transactions,
 		Uncles:      b.uncles,
 		Withdrawals: b.withdrawals,
-		AccessList:  b.accessList,
 	})
 }
 
 // Body returns the non-header content of the block.
 // Note the returned data is not an independent copy.
 func (b *Block) Body() *Body {
-	return &Body{b.transactions, b.uncles, b.withdrawals, b.accessList}
+	return &Body{b.transactions, b.uncles, b.withdrawals}
 }
 
 // Accessors for body data. These do not return a copy because the content
@@ -594,6 +587,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 		withdrawals:  b.withdrawals,
 		witness:      b.witness,
 		sidecars:     b.sidecars,
+		accessList:   b.accessList,
 	}
 }
 
@@ -607,10 +601,7 @@ func (b *Block) WithBody(body Body) *Block {
 		withdrawals:  slices.Clone(body.Withdrawals),
 		witness:      b.witness,
 		sidecars:     b.sidecars,
-	}
-	if body.AccessList != nil {
-		balCopy := body.AccessList.Copy()
-		block.accessList = balCopy
+		accessList:   b.accessList,
 	}
 	for i := range body.Uncles {
 		block.uncles[i] = CopyHeader(body.Uncles[i])
@@ -626,6 +617,7 @@ func (b *Block) WithWithdrawals(withdrawals []*Withdrawal) *Block {
 		uncles:       b.uncles,
 		witness:      b.witness,
 		sidecars:     b.sidecars,
+		accessList:   b.accessList,
 	}
 	if withdrawals != nil {
 		block.withdrawals = make([]*Withdrawal, len(withdrawals))
@@ -656,6 +648,7 @@ func (b *Block) WithSidecars(sidecars BlobSidecars) *Block {
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
 		witness:      b.witness,
+		accessList:   b.accessList,
 	}
 	if sidecars != nil {
 		block.sidecars = make(BlobSidecars, len(sidecars))
@@ -762,6 +755,9 @@ type BlockAccessListEncode struct {
 }
 
 func (b *BlockAccessListEncode) Copy() *BlockAccessListEncode {
+	if b == nil || b.AccessList == nil {
+		return nil
+	}
 	accessListCopy := b.AccessList.Copy()
 	return &BlockAccessListEncode{
 		Version:    b.Version,
@@ -770,4 +766,8 @@ func (b *BlockAccessListEncode) Copy() *BlockAccessListEncode {
 		SignData:   b.SignData,
 		AccessList: &accessListCopy,
 	}
+}
+
+func (b *BlockAccessListEncode) String() string {
+	return fmt.Sprintf("Version: %d, Number: %d, Hash: %s, SignData: %s, AccessList: %s", b.Version, b.Number, b.Hash.Hex(), common.Bytes2Hex(b.SignData), b.AccessList.String())
 }

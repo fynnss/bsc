@@ -125,7 +125,7 @@ type Engine interface {
 	//
 	// Note: The block header and state database might be updated to reflect any
 	// consensus rules that happen at finalization (e.g. block rewards).
-	FinalizeAndAssemble(chain ChainHeaderReader, header *types.Header, state state2.BlockProcessingDB, body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks) (*types.Block, []*types.Receipt, error)
+	FinalizeAndAssemble(chain ChainHeaderReader, header *types.Header, state *state2.StateDB, body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks, onFinalization func()) (*types.Block, []*types.Receipt, error)
 
 	// Seal generates a new sealing request for the given input block and pushes
 	// the result into the given channel.

@@ -22,8 +22,6 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/core/types/bal"
-
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/forkid"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -297,23 +295,21 @@ type BlockBody struct {
 	Uncles       []*types.Header      // Uncles contained within a block
 	Withdrawals  []*types.Withdrawal  `rlp:"optional"` // Withdrawals contained within a block
 	Sidecars     types.BlobSidecars   `rlp:"optional"` // Sidecars contained within a block
-	AccessList   *bal.BlockAccessList `rlp:"optional"`
 }
 
 // Unpack retrieves the transactions and uncles from the range packet and returns
 // them in a split flat format that's more consistent with the internal data structures.
-func (p *BlockBodiesResponse) Unpack() ([][]*types.Transaction, [][]*types.Header, [][]*types.Withdrawal, []types.BlobSidecars, []*bal.BlockAccessList) {
+func (p *BlockBodiesResponse) Unpack() ([][]*types.Transaction, [][]*types.Header, [][]*types.Withdrawal, []types.BlobSidecars) {
 	var (
 		txset         = make([][]*types.Transaction, len(*p))
 		uncleset      = make([][]*types.Header, len(*p))
 		withdrawalset = make([][]*types.Withdrawal, len(*p))
 		sidecarset    = make([]types.BlobSidecars, len(*p))
-		accessListSet = make([]*bal.BlockAccessList, len(*p))
 	)
 	for i, body := range *p {
-		txset[i], uncleset[i], withdrawalset[i], sidecarset[i], accessListSet[i] = body.Transactions, body.Uncles, body.Withdrawals, body.Sidecars, body.AccessList
+		txset[i], uncleset[i], withdrawalset[i], sidecarset[i] = body.Transactions, body.Uncles, body.Withdrawals, body.Sidecars
 	}
-	return txset, uncleset, withdrawalset, sidecarset, accessListSet
+	return txset, uncleset, withdrawalset, sidecarset
 }
 
 // GetReceiptsRequest represents a block receipts query.

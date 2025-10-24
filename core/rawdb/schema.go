@@ -143,6 +143,8 @@ var (
 
 	BlockBlobSidecarsPrefix = []byte("blobs")
 
+	BlockAccessListPrefix = []byte("bal")
+
 	// new log index
 	filterMapsPrefix         = "fm-"
 	filterMapsRangeKey       = []byte(filterMapsPrefix + "R")
@@ -201,6 +203,11 @@ func headerNumberKey(hash common.Hash) []byte {
 // blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
 func blockBodyKey(number uint64, hash common.Hash) []byte {
 	return append(append(blockBodyPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+}
+
+// blockBALKey = blockBALPrefix + blockNumber (uint64 big endian) + blockHash
+func blockAccessListKey(number uint64, hash common.Hash) []byte {
+	return append(append(BlockAccessListPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
 }
 
 // blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash

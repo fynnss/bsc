@@ -23,8 +23,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/ethereum/go-ethereum/core/types/bal"
-
 	"github.com/ethereum/go-ethereum/metrics"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -268,62 +266,21 @@ func (s *stateObject) setState(key common.Hash, value common.Hash, origin common
 
 // finalise moves all dirty storage slots into the pending area to be hashed or
 // committed later. It is invoked at the end of every transaction.
-func (s *stateObject) finalise() *bal.AccountState {
-	var accountPost bal.AccountState
-	if s.db.enableStateDiffRecording {
-		if s.Balance().Cmp(s.txPreBalance) != 0 {
-			accountPost.Balance = s.Balance()
-		}
-
-		if s.Nonce() != s.txPreNonce {
-			accountPost.Nonce = new(uint64)
-			*accountPost.Nonce = s.Nonce()
-		}
-
-		// include account code changes: created contracts and 7702 delegation authority code changes
-		if s.nonFinalizedCode {
-			if s.code == nil {
-				// code cleared (7702).  code must be non-nil in the post to signal that it's part of the diff vs being unchanged.
-				accountPost.Code = []byte{}
-			} else {
-				accountPost.Code = s.code
-			}
-		}
-	}
-
+func (s *stateObject) finalise() {
 	slotsToPrefetch := make([]common.Hash, 0, len(s.dirtyStorage))
 	for key, value := range s.dirtyStorage {
 		if origin, exist := s.uncommittedStorage[key]; exist && origin == value {
 			// The slot is reverted to its original value, delete the entry
 			// to avoid thrashing the data structures.
 			delete(s.uncommittedStorage, key)
-
-			if s.db.enableStateDiffRecording {
-				if accountPost.StorageWrites == nil {
-					accountPost.StorageWrites = make(map[common.Hash]common.Hash)
-				}
-				accountPost.StorageWrites[key] = value
-			}
 		} else if exist {
 			// The slot is modified to another value and the slot has been
 			// tracked for commit in uncommittedStorage.
-			if s.db.enableStateDiffRecording {
-				if accountPost.StorageWrites == nil {
-					accountPost.StorageWrites = make(map[common.Hash]common.Hash)
-				}
-				accountPost.StorageWrites[key] = value
-			}
 		} else {
 			// The slot is different from its original value and hasn't been
 			// tracked for commit yet.
 			s.uncommittedStorage[key] = s.GetCommittedState(key)
 			slotsToPrefetch = append(slotsToPrefetch, key) // Copy needed for closure
-			if s.db.enableStateDiffRecording {
-				if accountPost.StorageWrites == nil {
-					accountPost.StorageWrites = make(map[common.Hash]common.Hash)
-				}
-				accountPost.StorageWrites[key] = value
-			}
 		}
 		// Aggregate the dirty storage slots into the pending area. It might
 		// be possible that the value of tracked slot here is same with the
@@ -350,7 +307,6 @@ func (s *stateObject) finalise() *bal.AccountState {
 
 	s.txPreBalance = s.data.Balance.Clone()
 	s.txPreNonce = s.data.Nonce
-	return &accountPost
 }
 
 // updateTrie is responsible for persisting cached storage changes into the

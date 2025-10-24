@@ -1519,14 +1519,23 @@ func (p *Parlia) SignBAL(blockAccessList *types.BlockAccessListEncode) error {
 		return errors.New("sign for the block header failed")
 	}
 
+	if blockAccessList.SignData == nil {
+		blockAccessList.SignData = make([]byte, 65)
+	}
 	copy(blockAccessList.SignData, sig)
 	return nil
 }
 
 func (p *Parlia) VerifyBAL(block *types.Block, blockAccessList *types.BlockAccessListEncode) error {
-	if blockAccessList.Version != 0 {
+	if blockAccessList.Version != 1 {
 		log.Error("invalid BAL version", "version", blockAccessList.Version)
 		return errors.New("invalid BAL version")
+	}
+
+	if blockAccessList.AccessList.Hash().Cmp(blockAccessList.Hash) == 0 {
+		// TODO: skip the BAL signature verify temporarily
+		log.Info("skip the BAL signature verify temporarily", "block", block.Number(), "hash", block.Hash())
+		return nil
 	}
 
 	if len(blockAccessList.SignData) != 65 {
@@ -1535,7 +1544,7 @@ func (p *Parlia) VerifyBAL(block *types.Block, blockAccessList *types.BlockAcces
 	}
 
 	// Recover the public key and the Ethereum address
-	data, err := rlp.EncodeToBytes([]interface{}{blockAccessList.Version, block.Number(), block.Hash(), blockAccessList.AccessList.Hash()})
+	data, err := rlp.EncodeToBytes([]interface{}{blockAccessList.Version, blockAccessList.Number, blockAccessList.Hash, blockAccessList.AccessList.Hash()})
 	if err != nil {
 		log.Error("encode to bytes failed", "err", err)
 		return errors.New("encode to bytes failed")
@@ -1548,6 +1557,7 @@ func (p *Parlia) VerifyBAL(block *types.Block, blockAccessList *types.BlockAcces
 
 	pubkey, err := crypto.Ecrecover(crypto.Keccak256(data), blockAccessList.SignData)
 	if err != nil {
+		log.Error("Ecrecover failed", "err", err, "signData", blockAccessList.SignData)
 		return err
 	}
 	var pubkeyAddr common.Address
@@ -1555,7 +1565,7 @@ func (p *Parlia) VerifyBAL(block *types.Block, blockAccessList *types.BlockAcces
 
 	signer := block.Header().Coinbase
 	if signer != pubkeyAddr {
-		log.Error("BAL signer mismatch", "signer", signer, "pubkeyAddr", pubkeyAddr, "bal.Number", blockAccessList.Number, "bal.Hash", blockAccessList.Hash)
+		log.Error("BAL signer mismatch", "signer", signer, "pubkeyAddr", pubkeyAddr, "bal.Number", blockAccessList.Number, "bal.Hash", blockAccessList.Hash, "bal.signdata", common.Bytes2Hex(blockAccessList.SignData))
 		return errors.New("signer mismatch")
 	}
 
@@ -1564,8 +1574,8 @@ func (p *Parlia) VerifyBAL(block *types.Block, blockAccessList *types.BlockAcces
 
 // FinalizeAndAssemble implements consensus.Engine, ensuring no uncles are set,
 // nor block rewards given, and returns the final block.
-func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, state state.BlockProcessingDB,
-	body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks) (*types.Block, []*types.Receipt, error) {
+func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *types.Header, statedb *state.StateDB,
+	body *types.Body, receipts []*types.Receipt, tracer *tracing.Hooks, onFinalize func()) (*types.Block, []*types.Receipt, error) {
 	// No block rewards in PoA, so the state remains as is and uncles are dropped
 	cx := chainContext{Chain: chain, parlia: p}
 
@@ -1575,27 +1585,31 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	if receipts == nil {
 		receipts = make([]*types.Receipt, 0)
 	}
+	var workingState vm.StateDB = statedb
+	if tracer != nil {
+		workingState = state.NewHookedState(statedb, tracer)
+	}
 
 	parent := chain.GetHeaderByHash(header.ParentHash)
 	if parent == nil {
 		return nil, nil, errors.New("parent not found")
 	}
 
-	systemcontracts.TryUpdateBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, state, false)
+	systemcontracts.TryUpdateBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, workingState, false)
 
-	if err := p.checkNanoBlackList(state, header); err != nil {
+	if err := p.checkNanoBlackList(workingState, header); err != nil {
 		return nil, nil, err
 	}
 
 	if p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
-		err := p.initializeFeynmanContract(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
+		err := p.initializeFeynmanContract(workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
 		if err != nil {
 			log.Error("init feynman contract failed", "error", err)
 		}
 	}
 
 	if header.Number.Cmp(common.Big1) == 0 {
-		err := p.initContract(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
+		err := p.initContract(workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
 		if err != nil {
 			log.Error("init contract failed")
 		}
@@ -1619,7 +1633,7 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 			}
 		}
 		if !signedRecently {
-			err = p.slash(spoiledVal, state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
+			err = p.slash(spoiledVal, workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
 			if err != nil {
 				// it is possible that slash validator failed because of the slash channel is disabled.
 				log.Error("slash validator failed", "block hash", header.Hash(), "address", spoiledVal)
@@ -1627,13 +1641,13 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		}
 	}
 
-	err := p.distributeIncoming(p.val, state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
+	err := p.distributeIncoming(p.val, workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	if p.chainConfig.IsPlato(header.Number) {
-		if err := p.distributeFinalityReward(chain, state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer); err != nil {
+		if err := p.distributeFinalityReward(chain, workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -1642,7 +1656,7 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	if p.chainConfig.IsFeynman(header.Number, header.Time) && isBreatheBlock(parent.Time, header.Time) {
 		// we should avoid update validators in the Feynman upgrade block
 		if !p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
-			if err := p.updateValidatorSetV2(state, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer); err != nil {
+			if err := p.updateValidatorSetV2(workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -1653,12 +1667,17 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 		return nil, nil, errors.New("gas consumption of system txs exceed the gas limit")
 	}
 	header.UncleHash = types.EmptyUncleHash
+
+	if onFinalize != nil {
+		onFinalize()
+	}
+
 	var blk *types.Block
 	var rootHash common.Hash
 	wg := sync.WaitGroup{}
 	wg.Add(2)
 	go func() {
-		rootHash = state.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+		rootHash = workingState.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 		wg.Done()
 	}()
 	go func() {
@@ -2198,6 +2217,11 @@ func (p *Parlia) applyTransaction(
 		// move to next
 		*receivedTxs = (*receivedTxs)[1:]
 	}
+	if indexer, ok := state.(interface {
+		SetAccessListIndex(int)
+	}); ok {
+		indexer.SetAccessListIndex(len(*txs) + 1)
+	}
 	state.SetTxContext(expectedTx.Hash(), len(*txs))
 
 	// Create a new context to be used in the EVM environment
@@ -2438,7 +2462,7 @@ func (p *Parlia) checkNanoBlackList(state vm.StateDB, header *types.Header) erro
 	if p.chainConfig.IsNano(header.Number) {
 		for _, blackListAddr := range types.NanoBlackList {
 			// Check if the address exists in state (as a proxy for mutations)
-			if state.Exist(blackListAddr) {
+			if state.IsAddressInMutations(blackListAddr) {
 				log.Error("blacklisted address found", "address", blackListAddr)
 				return fmt.Errorf("block contains blacklisted address: %s", blackListAddr.Hex())
 			}

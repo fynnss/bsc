@@ -598,7 +598,7 @@ func (f *BlockFetcher) loop() {
 					case res := <-resCh:
 						res.Done <- nil
 						// Ignoring withdrawals here, will set it to empty later if EmptyWithdrawalsHash in header.
-						txs, uncles, _, sidecars, _ := res.Res.(*eth.BlockBodiesResponse).Unpack()
+						txs, uncles, _, sidecars := res.Res.(*eth.BlockBodiesResponse).Unpack()
 						f.FilterBodies(peer, txs, uncles, sidecars, time.Now())
 
 					case <-timeout.C:
@@ -933,6 +933,7 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 			log.Debug("Propagated block import failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
 			return
 		}
+
 		// If import succeeded, broadcast the block
 		blockAnnounceOutTimer.UpdateSince(block.ReceivedAt)
 		go f.broadcastBlock(block, false)

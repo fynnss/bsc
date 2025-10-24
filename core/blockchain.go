@@ -1791,7 +1791,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 				rawdb.WriteBlobSidecars(batch, block.Hash(), block.NumberU64(), block.Sidecars())
 			}
-
+			rawdb.WriteBlockAccessList(batch, block.Hash(), block.NumberU64(), block.AccessList())
 			// Write everything belongs to the blocks into the database. So that
 			// we can ensure all components of body is completed(body, receipts)
 			// except transaction indexes(will be created once sync is finished).
@@ -1869,6 +1869,7 @@ func (bc *BlockChain) writeBlockWithoutState(block *types.Block, td *big.Int) (e
 	if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 		rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 	}
+	rawdb.WriteBlockAccessList(blockBatch, block.Hash(), block.NumberU64(), block.AccessList())
 	if err := blockBatch.Write(); err != nil {
 		log.Crit("Failed to write block into disk", "err", err)
 	}
@@ -1915,6 +1916,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 			rawdb.WriteBlobSidecars(blockBatch, block.Hash(), block.NumberU64(), block.Sidecars())
 		}
+		rawdb.WriteBlockAccessList(blockBatch, block.Hash(), block.NumberU64(), block.AccessList())
 		if bc.db.HasSeparateStateStore() {
 			rawdb.WritePreimages(bc.db.GetStateStore(), statedb.Preimages())
 		} else {
@@ -2125,6 +2127,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 
 	// Do a sanity check that the provided chain is actually ordered and linked.
 	for i := 1; i < len(chain); i++ {
+		log.Debug("Inserting block", "hash", chain[i].Hash(), "number", chain[i].Number(), "difficulty", chain[i].Difficulty)
 		block, prev := chain[i], chain[i-1]
 		if block.NumberU64() != prev.NumberU64()+1 || block.ParentHash() != prev.Hash() {
 			log.Error("Non contiguous block insert",
@@ -2367,7 +2370,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		// construct or verify block access lists if BALs are enabled and
 		// we are post-selfdestruct removal fork.
 		enableBAL := bc.cfg.EnableBAL
-		blockHasAccessList := block.Body().AccessList != nil
+		blockHasAccessList := block.AccessList() != nil
 		makeBAL := enableBAL && !blockHasAccessList
 		validateBAL := enableBAL && blockHasAccessList
 
@@ -2526,7 +2529,7 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 			vmCfg := bc.cfg.VmConfig
 			vmCfg.Tracer = nil
 
-			if block.Body().AccessList == nil {
+			if block.AccessList() == nil {
 				bc.prefetcher.Prefetch(block.Transactions(), block.Header(), block.GasLimit(), throwaway, vmCfg, &interrupt)
 			}
 
@@ -2535,11 +2538,6 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 				blockPrefetchInterruptMeter.Mark(1)
 			}
 		}(time.Now(), throwaway, block)
-	}
-
-	// TODO: can remove validateBAL parameter and just look at whether the block has an access list?
-	if constructBALForTesting || validateBAL {
-		statedb.EnableStateDiffRecording()
 	}
 
 	// If we are past Byzantium, enable prefetching to pull in trie node paths
@@ -2561,7 +2559,7 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		// state root computation proceeds concurrently with transaction
 		// execution, meaning the prefetcher doesn't have any time to run
 		// before the trie nodes are needed for state root computation.
-		if block.Body().AccessList == nil {
+		if block.AccessList() == nil {
 			statedb.StartPrefetcher("chain", witness)
 			defer statedb.StopPrefetcher()
 		}
@@ -2582,11 +2580,54 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		}()
 	}
 
-	blockHadBAL := block.Body().AccessList != nil
+	blockHadBAL := block.AccessList() != nil
+	parallelMetrics := blockHadBAL
 	var res *ProcessResult
 	var resWithMetrics *ProcessResultWithMetrics
 	var ptime, vtime time.Duration
-	if block.Body().AccessList != nil {
+
+	runSequential := func(state *state.StateDB, logMsg string) (*ProcessResult, time.Duration, time.Duration, error) {
+		log.Info(logMsg, "block", block.Number(), "hash", block.Hash())
+		state.SetExpectedStateRoot(block.Root())
+		state.SetNeedBadSharedStorage(needBadSharedStorage)
+		var balTracer *BlockAccessListTracer
+		// Process block using the parent state as reference point
+		if constructBALForTesting {
+			balTracer, bc.cfg.VmConfig.Tracer = NewBlockAccessListTracer()
+			defer func() {
+				bc.cfg.VmConfig.Tracer = nil
+			}()
+
+		}
+
+		pstart := time.Now()
+		result, err := bc.processor.Process(block, state, bc.cfg.VmConfig)
+		if err != nil {
+			return result, time.Since(pstart), 0, err
+		}
+		ptime := time.Since(pstart)
+
+		// TODO: if I remove this check before executing balTracer.Finalise, the following test fails:
+		// ExecutionSpecBlocktests/shanghai/eip3855_push0/push0/push0_storage_overwrite.json
+		if constructBALForTesting {
+			balTracer.OnBlockFinalization()
+		}
+
+		vstart := time.Now()
+		if err := bc.validator.ValidateState(block, statedb, result, true, false); err != nil {
+			return result, ptime, time.Since(vstart), err
+		}
+		vtime := time.Since(vstart)
+
+		if constructBALForTesting {
+			// very ugly... deep-copy the block body before setting the block access
+			// list on it to prevent mutating the block instance passed by the caller.
+			block.WithAccessList(balTracer.AccessListEncoded(block.NumberU64(), block.Hash()))
+		}
+		return result, ptime, vtime, nil
+	}
+
+	if block.AccessList() != nil {
 		if block.NumberU64() == 0 {
 			return nil, fmt.Errorf("genesis block cannot have a block access list")
 		}
@@ -2595,11 +2636,25 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		// testing BALs in pre-Amsterdam blocks.
 		// Process block using the parent state as reference point
 		pstart := time.Now()
+		statedb.SetExpectedStateRoot(block.Root())
+		statedb.SetNeedBadSharedStorage(needBadSharedStorage)
+		log.Info("Processing block with BAL", "number", block.Number(), "hash", block.Hash())
 		resWithMetrics, err = bc.parallelProcessor.Process(block, statedb, bc.cfg.VmConfig)
 		if err != nil {
-			// TODO: okay to pass nil here as execution result?
-			bc.reportBlock(block, nil, err)
-			return nil, err
+			log.Warn("parallel BAL processing failed, falling back to sequential", "block", block.Number(), "hash", block.Hash(), "err", err)
+			// Reload a fresh statedb for sequential fallback since the previous one might be mutated.
+			fallbackState, fallbackErr := state.New(parentRoot, bc.statedb)
+			if fallbackErr != nil {
+				return nil, fallbackErr
+			}
+			statedb = fallbackState
+			res, ptime, vtime, err = runSequential(statedb, "sequential fallback processing")
+			if err != nil {
+				bc.reportBlock(block, res, err)
+				return nil, err
+			}
+			parallelMetrics = false
+			goto sequentialDone
 		}
 		ptime = time.Since(pstart)
 
@@ -2614,44 +2669,16 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		res = resWithMetrics.ProcessResult
 		vtime = time.Since(vstart)
 	} else {
-		statedb.SetExpectedStateRoot(block.Root())
-		statedb.SetNeedBadSharedStorage(needBadSharedStorage)
-		var sdb state.BlockProcessingDB = statedb
-		if constructBALForTesting {
-			sdb = state.NewBlockAccessListBuilder(statedb)
-		}
-
-		// Process block using the parent state as reference point
-		pstart := time.Now()
-
-		res, err = bc.processor.Process(block, sdb, bc.cfg.VmConfig)
-		if err != nil {
-			bc.reportBlock(block, res, err)
-			return nil, err
-		}
-		ptime = time.Since(pstart)
-
-		vstart := time.Now()
-		if err := bc.validator.ValidateState(block, sdb, res, true, false); err != nil {
-			bc.reportBlock(block, res, err)
-			return nil, err
-		}
-		vtime = time.Since(vstart)
-
-		if constructBALForTesting {
-			// very ugly... deep-copy the block body before setting the block access
-			// list on it to prevent mutating the block instance passed by the caller.
-			existingBody := block.Body()
-			block = block.WithBody(*existingBody)
-			existingBody = block.Body()
-			accessList := sdb.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj()
-			existingBody.AccessList = &types.BlockAccessListEncode{
-				AccessList: accessList,
-			}
-			block = block.WithBody(*existingBody)
+		parallelMetrics = false
+		var seqErr error
+		res, ptime, vtime, seqErr = runSequential(statedb, "process block")
+		if seqErr != nil {
+			bc.reportBlock(block, res, seqErr)
+			return nil, seqErr
 		}
 	}
 
+sequentialDone:
 	// If witnesses was generated and stateless self-validation requested, do
 	// that now. Self validation should *never* run in production, it's more of
 	// a tight integration to enable running *all* consensus tests through the
@@ -2681,7 +2708,7 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		}
 	}
 	var proctime time.Duration
-	if blockHadBAL {
+	if parallelMetrics {
 		blockPreprocessingTimer.Update(resWithMetrics.PreProcessTime)
 		blockPrestateLoadTimer.Update(resWithMetrics.PrestateLoadTime)
 		txExecutionTimer.Update(resWithMetrics.ExecTime)

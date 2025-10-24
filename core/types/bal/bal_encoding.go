@@ -27,7 +27,6 @@ import (
 	"slices"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -39,37 +38,44 @@ import (
 // These are objects used as input for the access list encoding. They mirror
 // the spec format.
 
-// BlockAccessList is the encoding format of ConstructionBlockAccessList.
+// BlockAccessList is the encoding format of AccessListBuilder.
 type BlockAccessList []AccountAccess
 
-func (obj BlockAccessList) EncodeRLP(_w io.Writer) error {
+func (e BlockAccessList) EncodeRLP(_w io.Writer) error {
 	w := rlp.NewEncoderBuffer(_w)
 	l := w.List()
-	for _, access := range obj {
+	for _, access := range e {
 		access.EncodeRLP(w)
 	}
 	w.ListEnd(l)
 	return w.Flush()
 }
 
-func (obj *BlockAccessList) DecodeRLP(dec *rlp.Stream) error {
+func (e *BlockAccessList) DecodeRLP(dec *rlp.Stream) error {
 	if _, err := dec.List(); err != nil {
 		return err
 	}
-	*obj = (*obj)[:0]
+	*e = (*e)[:0]
 	for dec.MoreDataInList() {
 		var access AccountAccess
 		if err := access.DecodeRLP(dec); err != nil {
 			return err
 		}
-		*obj = append(*obj, access)
+		*e = append(*e, access)
 	}
 	dec.ListEnd()
 	return nil
 }
 
-var _ rlp.Encoder = &BlockAccessList{}
-var _ rlp.Decoder = &BlockAccessList{}
+// StringableRepresentation returns an instance of the block access list
+// which can be converted to a human-readable JSON representation.
+func (e *BlockAccessList) StringableRepresentation() interface{} {
+	res := []AccountAccess{}
+	for _, aa := range *e {
+		res = append(res, aa)
+	}
+	return &res
+}
 
 func (e *BlockAccessList) String() string {
 	var res bytes.Buffer
@@ -89,13 +95,7 @@ func (e BlockAccessList) Validate() error {
 	}) {
 		return errors.New("block access list accounts not in lexicographic order")
 	}
-	acctMap := make(map[common.Address]struct{})
 	for _, entry := range e {
-		if _, ok := acctMap[entry.Address]; ok {
-			return errors.New("duplicate account in block access list")
-		}
-		acctMap[entry.Address] = struct{}{}
-
 		if err := entry.validate(); err != nil {
 			return err
 		}
@@ -151,7 +151,7 @@ func (e *encodingSlotWrites) validate() error {
 	return errors.New("storage write tx indices not in order")
 }
 
-// AccountAccess is the encoding format of ConstructionAccountAccess.
+// AccountAccess is the encoding format of ConstructionAccountAccesses.
 type AccountAccess struct {
 	Address        common.Address          `json:"address,omitempty"`        // 20-byte Ethereum address
 	StorageChanges []encodingSlotWrites    `json:"storageChanges,omitempty"` // Storage changes (slot -> [tx_index -> new_value])
@@ -176,14 +176,6 @@ func (e *AccountAccess) validate() error {
 			return err
 		}
 	}
-
-	// Check the storage read slots are sorted in order
-	if !slices.IsSortedFunc(e.StorageReads, func(a, b common.Hash) int {
-		return bytes.Compare(a[:], b[:])
-	}) {
-		return errors.New("storage read slots not in lexicographic order")
-	}
-
 	// test case ideas: keys in both read/writes, duplicate keys in either read/writes
 	// ensure that the read and write key sets are distinct
 	readKeys := make(map[common.Hash]struct{})
@@ -206,6 +198,13 @@ func (e *AccountAccess) validate() error {
 		if _, ok := writeKeys[readKey]; ok {
 			return errors.New("storage key reported in both read/write sets")
 		}
+	}
+
+	// Check the storage read slots are sorted in order
+	if !slices.IsSortedFunc(e.StorageReads, func(a, b common.Hash) int {
+		return bytes.Compare(a[:], b[:])
+	}) {
+		return errors.New("storage read slots not in lexicographic order")
 	}
 
 	// Check the balance changes are sorted in order
@@ -256,15 +255,15 @@ func (e *AccountAccess) Copy() AccountAccess {
 }
 
 // EncodeRLP returns the RLP-encoded access list
-func (c *ConstructionBlockAccessList) EncodeRLP(wr io.Writer) error {
+func (c *AccessListBuilder) EncodeRLP(wr io.Writer) error {
 	return c.ToEncodingObj().EncodeRLP(wr)
 }
 
-var _ rlp.Encoder = &ConstructionBlockAccessList{}
+var _ rlp.Encoder = &AccessListBuilder{}
 
-// toEncodingObj creates an instance of the ConstructionAccountAccess of the type that is
+// toEncodingObj creates an instance of the ConstructionAccountAccesses of the type that is
 // used as input for the encoding.
-func (a *ConstructionAccountAccess) toEncodingObj(addr common.Address) AccountAccess {
+func (a *ConstructionAccountAccesses) toEncodingObj(addr common.Address) AccountAccess {
 	res := AccountAccess{
 		Address:        addr,
 		StorageChanges: make([]encodingSlotWrites, 0),
@@ -336,51 +335,18 @@ func (a *ConstructionAccountAccess) toEncodingObj(addr common.Address) AccountAc
 
 // ToEncodingObj returns an instance of the access list expressed as the type
 // which is used as input for the encoding/decoding.
-func (c *ConstructionBlockAccessList) ToEncodingObj() *BlockAccessList {
+func (c *AccessListBuilder) ToEncodingObj() *BlockAccessList {
 	var addresses []common.Address
-	for addr := range c.Accounts {
+	for addr := range c.FinalizedAccesses {
 		addresses = append(addresses, addr)
 	}
 	slices.SortFunc(addresses, common.Address.Cmp)
 
 	var res BlockAccessList
 	for _, addr := range addresses {
-		res = append(res, c.Accounts[addr].toEncodingObj(addr))
+		res = append(res, c.FinalizedAccesses[addr].toEncodingObj(addr))
 	}
 	return &res
 }
 
 type ContractCode []byte
-
-func (c *ContractCode) MarshalJSON() ([]byte, error) {
-	hexStr := fmt.Sprintf("%x", *c)
-	return json.Marshal(hexStr)
-}
-
-// UnmarshalJSON implements json.Unmarshaler to decode from RLP hex bytes
-func (b *BlockAccessList) UnmarshalJSON(input []byte) error {
-	// Handle both hex string and object formats
-	var hexBytes hexutil.Bytes
-	if err := json.Unmarshal(input, &hexBytes); err == nil {
-		// It's a hex string, decode from RLP
-		return rlp.DecodeBytes(hexBytes, b)
-	}
-
-	// Otherwise try to unmarshal as structured JSON
-	var tmp []AccountAccess
-	if err := json.Unmarshal(input, &tmp); err != nil {
-		return err
-	}
-	*b = BlockAccessList(tmp)
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler to encode as RLP hex bytes
-func (b BlockAccessList) MarshalJSON() ([]byte, error) {
-	// Encode to RLP then to hex
-	rlpBytes, err := rlp.EncodeToBytes(b)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(hexutil.Bytes(rlpBytes))
-}

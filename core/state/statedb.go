@@ -158,8 +158,7 @@ type StateDB struct {
 	// State witness if cross validation is needed
 	witness *stateless.Witness // TODO(Nathan): more define the relation with `noTrie`
 
-	enableStateDiffRecording bool              // if true, calls to Finalise will return the mutated state
-	stateAccesses            bal.StateAccesses // accounts/storage accessed during transaction execution
+	stateAccesses bal.StateAccesses // accounts/storage accessed during transaction execution
 
 	blockAccessList *BALReader
 
@@ -216,13 +215,6 @@ func NewWithReader(root common.Hash, db Database, reader Reader) (*StateDB, erro
 		sdb.accessEvents = NewAccessEvents(db.PointCache())
 	}
 	return sdb, nil
-}
-
-// EnableStateDiffRecording enables the recording of state modifications
-// which are accumulated at each call to Finalise and can be retrieved
-// using GetStateDiff.
-func (s *StateDB) EnableStateDiffRecording() {
-	s.enableStateDiffRecording = true
 }
 
 func (s *StateDB) SetNeedBadSharedStorage(needBadSharedStorage bool) {
@@ -482,14 +474,6 @@ func (s *StateDB) GetCodeHash(addr common.Address) common.Hash {
 // GetState retrieves the value associated with the specific key.
 func (s *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := s.getStateObject(addr)
-	if s.enableStateDiffRecording {
-		if _, shouldIgnore := IgnoredBALAddresses[addr]; !shouldIgnore {
-			if _, ok := s.stateAccesses[addr]; !ok {
-				s.stateAccesses[addr] = make(map[common.Hash]struct{})
-			}
-			s.stateAccesses[addr][hash] = struct{}{}
-		}
-	}
 	if stateObject != nil {
 		return stateObject.GetState(hash)
 	}
@@ -730,13 +714,6 @@ func (s *StateDB) deleteStateObject(addr common.Address) {
 // getStateObject retrieves a state object given by the address, returning nil if
 // the object is not found or was deleted in this execution context.
 func (s *StateDB) getStateObject(addr common.Address) *stateObject {
-	if s.enableStateDiffRecording {
-		if _, shouldIgnore := IgnoredBALAddresses[addr]; !shouldIgnore {
-			if _, ok := s.stateAccesses[addr]; !ok {
-				s.stateAccesses[addr] = make(map[common.Hash]struct{})
-			}
-		}
-	}
 	// Prefer live objects if any is available
 	if obj := s.stateObjects[addr]; obj != nil {
 		return obj
@@ -837,18 +814,18 @@ func (s *StateDB) CreateContract(addr common.Address) {
 
 // Copy creates a deep, independent copy of the state.
 // Snapshots of the copied state cannot be applied to the copy.
-func (s *StateDB) Copy() BlockProcessingDB {
+func (s *StateDB) Copy() *StateDB {
 	return s.copyInternal(false)
 }
 
 // It is mainly for state prefetcher to do trie prefetch right now.
-func (s *StateDB) CopyDoPrefetch() BlockProcessingDB {
+func (s *StateDB) CopyDoPrefetch() *StateDB {
 	return s.copyInternal(true)
 }
 
 // If doPrefetch is true, it tries to reuse the prefetcher, the copied StateDB will do active trie prefetch.
 // otherwise, just do inactive copy trie prefetcher.
-func (s *StateDB) copyInternal(doPrefetch bool) BlockProcessingDB {
+func (s *StateDB) copyInternal(doPrefetch bool) *StateDB {
 	// Copy all the basic fields, initialize the memory ones
 	state := &StateDB{
 		db:     s.db,
@@ -863,15 +840,13 @@ func (s *StateDB) copyInternal(doPrefetch bool) BlockProcessingDB {
 		refund:               s.refund,
 		thash:                s.thash,
 		txIndex:              s.txIndex,
-		balIndex:             s.txIndex,
+		balIndex:             s.balIndex,
 		logs:                 make(map[common.Hash][]*types.Log, len(s.logs)),
 		logSize:              s.logSize,
 		preimages:            maps.Clone(s.preimages),
 
-		// don't deep-copy these
-		enableStateDiffRecording: s.enableStateDiffRecording,
-		stateAccesses:            make(bal.StateAccesses), // Don't deep copy state accesses
-		blockAccessList:          s.blockAccessList,
+		stateAccesses:   make(bal.StateAccesses), // Don't deep copy state accesses
+		blockAccessList: s.blockAccessList,
 
 		// Do we need to copy the access list and transient storage?
 		// In practice: No. At the start of a transaction, these two lists are empty.
@@ -945,8 +920,7 @@ func (s *StateDB) GetRefund() uint64 {
 //
 // If EnableStateDiffRecording has been called, it returns a state diff containing
 // the state which was mutated since the previous invocation of Finalise. Otherwise, nil.
-func (s *StateDB) Finalise(deleteEmptyObjects bool) (mutations *bal.StateDiff, accesses *bal.StateAccesses) {
-	mutations = &bal.StateDiff{Mutations: make(map[common.Address]*bal.AccountState)}
+func (s *StateDB) Finalise(deleteEmptyObjects bool) {
 	addressesToPrefetch := make([]common.Address, 0, len(s.journal.dirties))
 	for addr := range s.journal.dirties {
 		obj, exist := s.stateObjects[addr]
@@ -960,24 +934,6 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) (mutations *bal.StateDiff, a
 			continue
 		}
 		if obj.selfDestructed || (deleteEmptyObjects && obj.empty()) {
-			// record state diffs for any preexisting accounts which became empty
-			if s.enableStateDiffRecording && obj.txPreBalance != nil && !obj.txPreBalance.IsZero() {
-				if _, shouldIgnore := IgnoredBALAddresses[obj.address]; !shouldIgnore {
-					// TODO: IsZero check is somehow needed for coinbase.  figure out why.
-					// TODO: the above check should be as easy as checking that the account was not selfdestructed in the
-					// current transaction, but that causes spec tests to fail.  need to figure out why.
-					postState := bal.NewEmptyAccountState()
-					postState.Balance = new(uint256.Int)
-					mutations.Mutations[obj.address] = postState
-
-					// note that this account cannot have any storage accesses in the same tx:
-					// * it cannot have code if it was previously-existing and became empty in this tx
-					// * perhaps it could have had code deployed before selfdestruct removal, that set some storage
-					//   and the code was removed (pre-selfdestruct removal) leaving the storage.  But the storage
-					//   won't be cleared from the state here right
-				}
-			}
-
 			delete(s.stateObjects, obj.address)
 			s.markDelete(addr)
 			// We need to maintain account deletions explicitly (will remain
@@ -987,26 +943,8 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) (mutations *bal.StateDiff, a
 				s.stateObjectsDestruct[obj.address] = obj
 			}
 		} else {
-			accountPost := obj.finalise()
+			obj.finalise()
 
-			if s.enableStateDiffRecording {
-				if accountPost.Nonce != nil || accountPost.Code != nil || accountPost.StorageWrites != nil || accountPost.Balance != nil {
-					// the account executed SENDALL but did not send a balance, don't include it in the diff
-					// TODO: probably shouldn't include the account in the dirty set in this case (unrelated to the BAL changes)
-					mutations.Mutations[obj.address] = accountPost
-				}
-				if len(accountPost.StorageWrites) > 0 {
-					// remove all the written slots from the accessedState
-					if _, ok := s.stateAccesses[obj.address]; ok {
-						for slot, _ := range accountPost.StorageWrites {
-							delete(s.stateAccesses[obj.address], slot)
-						}
-					}
-				}
-				if _, ok := s.stateAccesses[obj.address]; ok && len(s.stateAccesses[obj.address]) == 0 {
-					delete(s.stateAccesses, obj.address)
-				}
-			}
 			s.markUpdate(addr)
 		} // At this point, also ship the address off to the precacher. The precacher
 		// will start loading tries, and when the change is eventually committed,
@@ -1021,11 +959,6 @@ func (s *StateDB) Finalise(deleteEmptyObjects bool) (mutations *bal.StateDiff, a
 
 	// Invalidate journal because reverting across transactions is not allowed.
 	s.clearJournalAndRefund()
-
-	accesses = new(bal.StateAccesses)
-	*accesses = s.stateAccesses
-	s.stateAccesses = make(bal.StateAccesses)
-	return mutations, accesses
 }
 
 // IntermediateRoot computes the current root hash of the state trie.

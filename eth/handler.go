@@ -141,6 +141,7 @@ type handlerConfig struct {
 	PeerSet                   *peerSet
 	EnableQuickBlockFetching  bool
 	EnableEVNFeatures         bool
+	EnableBAL                 bool
 	EVNNodeIdsWhitelist       []enode.ID
 	ProxyedValidatorAddresses []common.Address
 }
@@ -172,6 +173,8 @@ type handler struct {
 	blockFetcher *fetcher.BlockFetcher
 	txFetcher    *fetcher.TxFetcher
 	peers        *peerSet
+
+	enableBAL bool
 
 	eventMux       *event.TypeMux
 	txsCh          chan core.NewTxsEvent
@@ -226,6 +229,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		handlerDoneCh:              make(chan struct{}),
 		handlerStartCh:             make(chan struct{}),
 		stopCh:                     make(chan struct{}),
+		enableBAL:                  config.EnableBAL,
 	}
 	for _, nodeID := range config.EVNNodeIdsWhitelist {
 		h.evnNodeIdsWhitelistMap[nodeID] = struct{}{}
@@ -328,7 +332,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		if p.bscExt == nil {
 			return nil, fmt.Errorf("peer does not support bsc protocol, peer: %v", p.ID())
 		}
-		if p.bscExt.Version() != bsc.Bsc2 {
+		if p.bscExt.Version() < bsc.Bsc2 {
 			return nil, fmt.Errorf("remote peer does not support the required Bsc2 protocol version, peer: %v", p.ID())
 		}
 		res, err := p.bscExt.RequestBlocksByRange(startHeight, startHash, count)
@@ -340,6 +344,7 @@ func newHandler(config *handlerConfig) (*handler, error) {
 		for i, item := range res {
 			block := types.NewBlockWithHeader(item.Header).WithBody(types.Body{Transactions: item.Txs, Uncles: item.Uncles})
 			block = block.WithSidecars(item.Sidecars)
+			block = block.WithAccessList(item.BlockAccessList)
 			block.ReceivedAt = time.Now()
 			block.ReceivedFrom = p.ID()
 			if err := block.SanityCheck(); err != nil {
@@ -463,7 +468,7 @@ func (h *handler) runEthPeer(peer *eth.Peer, handler eth.Handler) error {
 
 	if bscExt != nil && bscExt.Version() == bsc.Bsc3 {
 		peer.CanHandleBAL.Store(true)
-		log.Debug("runEthPeer", "bscExt.Version", bscExt.Version(), "CanHandleBAL", peer.CanHandleBAL.Load())
+		log.Info("runEthPeer", "bscExt.Version", bscExt.Version(), "CanHandleBAL", peer.CanHandleBAL.Load())
 	}
 
 	// Execute the Ethereum handshake

@@ -52,12 +52,12 @@ func NewStatePrefetcher(config *params.ChainConfig, chain *HeaderChain) *statePr
 // Prefetch processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to warm the state caches.
-func (p *statePrefetcher) Prefetch(transactions types.Transactions, header *types.Header, gasLimit uint64, statedb state.BlockProcessingDB, cfg vm.Config, interrupt *atomic.Bool) {
+func (p *statePrefetcher) Prefetch(transactions types.Transactions, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interrupt *atomic.Bool) {
 	var (
 		fails   atomic.Int64
 		signer  = types.MakeSigner(p.config, header.Number, header.Time)
 		workers errgroup.Group
-		reader  = statedb.(*state.StateDB).Reader()
+		reader  = statedb.Reader()
 	)
 	workers.SetLimit(max(1, 3*runtime.NumCPU()/5)) // Aggressively run the prefetching
 
@@ -132,7 +132,7 @@ func (p *statePrefetcher) Prefetch(transactions types.Transactions, header *type
 // PrefetchMining processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb, but any changes are discarded. The
 // only goal is to warm the state caches. Only used for mining stage.
-func (p *statePrefetcher) PrefetchMining(txs TransactionsByPriceAndNonce, header *types.Header, gasLimit uint64, statedb state.BlockProcessingDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr **types.Transaction) {
+func (p *statePrefetcher) PrefetchMining(txs TransactionsByPriceAndNonce, header *types.Header, gasLimit uint64, statedb *state.StateDB, cfg vm.Config, interruptCh <-chan struct{}, txCurr **types.Transaction) {
 	var signer = types.MakeSigner(p.config, header.Number, header.Time)
 
 	txCh := make(chan *types.Transaction, 2*prefetchMiningThread)

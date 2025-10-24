@@ -25,6 +25,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set/v2"
+	"github.com/ethereum/go-ethereum/core/tracing"
 	"github.com/holiman/uint256"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -96,10 +97,10 @@ var (
 // information of the sealing block generation.
 type environment struct {
 	signer   types.Signer
-	state    state.BlockProcessingDB // apply state changes here
-	tcount   int                     // count of non-system transactions in cycle
-	size     uint64                  // size of the block we are building
-	gasPool  *core.GasPool           // available gas used to pack transactions
+	state    *state.StateDB // apply state changes here
+	tcount   int            // count of non-system transactions in cycle
+	size     uint64         // size of the block we are building
+	gasPool  *core.GasPool  // available gas used to pack transactions
 	coinbase common.Address
 	evm      *vm.EVM
 
@@ -112,6 +113,8 @@ type environment struct {
 	witness *stateless.Witness
 
 	committed bool
+	alTracer  *core.BlockAccessListTracer
+	vmConfig  vm.Config
 }
 
 // copy creates a deep copy of environment.
@@ -154,7 +157,7 @@ func (env *environment) discard() {
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
 	receipts  []*types.Receipt
-	state     state.BlockProcessingDB
+	state     *state.StateDB
 	block     *types.Block
 	createdAt time.Time
 
@@ -180,12 +183,12 @@ type newWorkReq struct {
 type newPayloadResult struct {
 	err      error
 	block    *types.Block
-	fees     *big.Int                // total block fees
-	sidecars []*types.BlobTxSidecar  // collected blobs of blob transactions
-	stateDB  state.BlockProcessingDB // StateDB after executing the transactions
-	receipts []*types.Receipt        // Receipts collected during construction
-	requests [][]byte                // Consensus layer requests collected during block construction
-	witness  *stateless.Witness      // Witness is an optional stateless proof
+	fees     *big.Int               // total block fees
+	sidecars []*types.BlobTxSidecar // collected blobs of blob transactions
+	stateDB  *state.StateDB         // StateDB after executing the transactions
+	receipts []*types.Receipt       // Receipts collected during construction
+	requests [][]byte               // Consensus layer requests collected during block construction
+	witness  *stateless.Witness     // Witness is an optional stateless proof
 }
 
 // getWorkReq represents a request for getting a new sealing work with provided parameters.
@@ -243,7 +246,7 @@ type worker struct {
 	snapshotMu       sync.RWMutex // The lock used to protect the snapshots below
 	snapshotBlock    *types.Block
 	snapshotReceipts types.Receipts
-	snapshotState    state.BlockProcessingDB
+	snapshotState    *state.StateDB
 
 	// atomic status counters
 	running atomic.Bool // The indicator whether the consensus engine is running or not.
@@ -378,7 +381,7 @@ func (w *worker) setPrioAddresses(prio []common.Address) {
 
 // Pending returns the currently pending block, associated receipts and statedb.
 // The returned values can be nil in case the pending block is not initialized.
-func (w *worker) pending() (*types.Block, types.Receipts, state.BlockProcessingDB) {
+func (w *worker) pending() (*types.Block, types.Receipts, *state.StateDB) {
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
 	if w.snapshotState == nil {
@@ -598,7 +601,7 @@ func (w *worker) resultLoop() {
 	for {
 		select {
 		case block := <-w.resultCh:
-			// Short circuit when receiving empty result.
+			// Short circuit when receiving empty result/core/types/block.go./core/types/block.go
 			if block == nil {
 				continue
 			}
@@ -670,7 +673,7 @@ func (w *worker) resultLoop() {
 
 			// Commit block and state to database.
 			start := time.Now()
-			status, err := w.chain.WriteBlockAndSetHead(block, receipts, logs, task.state.(*state.StateDB), w.mux)
+			status, err := w.chain.WriteBlockAndSetHead(block, receipts, logs, task.state, w.mux)
 			if status != core.CanonStatTy {
 				if err != nil {
 					log.Error("Failed writing block to chain", "err", err, "status", status)
@@ -683,8 +686,15 @@ func (w *worker) resultLoop() {
 			stats := w.chain.GetBlockStats(block.Hash())
 			stats.SendBlockTime.Store(time.Now().UnixMilli())
 			stats.StartMiningTime.Store(task.miningStartAt.UnixMilli())
-			log.Info("Successfully seal and write new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
-				"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
+			if w.chainConfig.IsCancun(block.Number(), block.Header().Time) && w.chainConfig.EnableBAL {
+				log.Info("Successfully seal and write new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
+					"accessListSize", block.AccessListSize(), "signData", common.Bytes2Hex(block.AccessList().SignData),
+					"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
+			} else {
+
+				log.Info("Successfully seal and write new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
+					"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
+			}
 			w.mux.Post(core.NewMinedBlockEvent{Block: block})
 
 		case <-w.exitCh:
@@ -698,7 +708,7 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 	prevEnv *environment, witness bool) (*environment, error) {
 	// Retrieve the parent state to execute on top and start a prefetcher for
 	// the miner to speed block sealing up a bit
-	st, err := w.chain.StateAt(parent.Root)
+	sdb, err := w.chain.StateAt(parent.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -707,30 +717,35 @@ func (w *worker) makeEnv(parent *types.Header, header *types.Header, coinbase co
 		if err != nil {
 			return nil, err
 		}
-		st.StartPrefetcher("miner", bundle)
+		sdb.StartPrefetcher("miner", bundle)
 	} else {
 		if prevEnv == nil {
-			st.StartPrefetcher("miner", nil)
+			sdb.StartPrefetcher("miner", nil)
 		} else {
-			st.TransferPrefetcher(prevEnv.state.(*state.StateDB))
+			sdb.TransferPrefetcher(prevEnv.state)
 		}
 	}
-	var sdb state.BlockProcessingDB = st
+	var alTracer *core.BlockAccessListTracer
+	var hooks *tracing.Hooks
+	var hookedState vm.StateDB = sdb
+	var vmConfig vm.Config
 	if w.chainConfig.IsEnableBAL() {
-		// TODO: if I disable this, the local devnet still works fine with empty BALs... clearly there is some bug afoot
-		st.EnableStateDiffRecording()
-		sdb = state.NewBlockAccessListBuilder(st)
+		alTracer, hooks = core.NewBlockAccessListTracer()
+		hookedState = state.NewHookedState(sdb, hooks)
+		vmConfig.Tracer = hooks
 	}
 
 	// Note the passed coinbase may be different with header.Coinbase.
 	env := &environment{
 		signer:   types.MakeSigner(w.chainConfig, header.Number, header.Time),
-		state:    st,
+		state:    sdb,
 		coinbase: coinbase,
 		header:   header,
 		size:     uint64(header.Size()),
 		witness:  sdb.Witness(),
-		evm:      vm.NewEVM(core.NewEVMBlockContext(header, w.chain, &coinbase), sdb, w.chainConfig, vm.Config{}),
+		evm:      vm.NewEVM(core.NewEVMBlockContext(header, w.chain, &coinbase), hookedState, w.chainConfig, vmConfig),
+		alTracer: alTracer,
+		vmConfig: vmConfig,
 	}
 	// Keep track of transactions which return errors so they can be removed
 	env.tcount = 0
@@ -1105,7 +1120,7 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 	}
 
 	// Handle upgrade built-in system contract code
-	systemcontracts.TryUpdateBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.state, true)
+	systemcontracts.TryUpdateBuildInSystemContract(w.chainConfig, header.Number, parent.Time, header.Time, env.evm.StateDB, true)
 
 	if header.ParentBeaconRoot != nil {
 		core.ProcessBeaconBlockRoot(*header.ParentBeaconRoot, env.evm)
@@ -1114,6 +1129,12 @@ func (w *worker) prepareWork(genParams *generateParams, witness bool) (*environm
 	if w.chainConfig.IsPrague(header.Number, header.Time) {
 		core.ProcessParentBlockHash(header.ParentHash, env.evm)
 	}
+
+	if w.chainConfig.IsEnableBAL() && env.alTracer != nil {
+		env.alTracer.OnPreTxExecutionDone()
+		log.Debug("Marked pre-tx operations done for BAL", "number", header.Number)
+	}
+
 	return env, nil
 }
 
@@ -1224,6 +1245,7 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 		}
 	}
 	body := types.Body{Transactions: work.txs, Withdrawals: params.withdrawals}
+
 	allLogs := make([]*types.Log, 0)
 	for _, r := range work.receipts {
 		allLogs = append(allLogs, r.Logs...)
@@ -1237,11 +1259,11 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 			return &newPayloadResult{err: err}
 		}
 		// EIP-7002
-		if _, _, err := core.ProcessWithdrawalQueue(&requests, work.evm); err != nil {
+		if err := core.ProcessWithdrawalQueue(&requests, work.evm); err != nil {
 			return &newPayloadResult{err: err}
 		}
 		// EIP-7251 consolidations
-		if _, _, err := core.ProcessConsolidationQueue(&requests, work.evm); err != nil {
+		if err := core.ProcessConsolidationQueue(&requests, work.evm); err != nil {
 			return &newPayloadResult{err: err}
 		}
 	}
@@ -1251,21 +1273,7 @@ func (w *worker) generateWork(params *generateParams, witness bool) *newPayloadR
 	}
 
 	fees := work.state.GetBalance(consensus.SystemAddress)
-	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts, nil)
-	if w.chainConfig.IsEnableBAL() {
-		body := block.Body()
-		body.AccessList = &types.BlockAccessListEncode{
-			Version:    0,
-			Number:     block.NumberU64(),
-			Hash:       block.Hash(),
-			AccessList: work.state.(*state.AccessListCreationDB).ConstructedBlockAccessList().ToEncodingObj(),
-		}
-
-		if err := w.engine.SignBAL(body.AccessList); err != nil {
-			return &newPayloadResult{err: err}
-		}
-		block = block.WithBody(*body)
-	}
+	block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, work.header, work.state, &body, work.receipts, nil, nil)
 	if err != nil {
 		return &newPayloadResult{err: err}
 	}
@@ -1562,11 +1570,24 @@ func (w *worker) commit(env *environment, interval func(), update bool, start ti
 		feesInEther := new(big.Float).Quo(new(big.Float).SetInt(fees), big.NewFloat(params.Ether))
 		// Withdrawals are set to nil here, because this is only called in PoW.
 		finalizeStart := time.Now()
+		var accessList *types.BlockAccessListEncode
+		onBlockFinalization := func() {
+			if w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.EnableBAL && env.alTracer != nil {
+				env.alTracer.OnBlockFinalization()
+				accessList = env.alTracer.AccessListEncoded(env.header.Number.Uint64(), env.header.Hash())
+			}
+		}
+
 		body := types.Body{Transactions: env.txs}
 		if env.header.EmptyWithdrawalsHash() {
 			body.Withdrawals = make([]*types.Withdrawal, 0)
 		}
-		block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(env.header), env.state, &body, env.receipts, nil)
+		block, receipts, err := w.engine.FinalizeAndAssemble(w.chain, types.CopyHeader(env.header), env.state, &body, env.receipts, env.vmConfig.Tracer, onBlockFinalization)
+
+		if w.chainConfig.IsCancun(env.header.Number, env.header.Time) && w.chainConfig.EnableBAL && w.engine.SignBAL(accessList) == nil {
+			block = block.WithAccessList(accessList)
+		}
+
 		env.committed = true
 		if err != nil {
 			return err

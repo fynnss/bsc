@@ -185,7 +185,7 @@ func (miner *Miner) Pending() (*types.Block, types.Receipts, *state.StateDB) {
 	if miner.worker.isRunning() {
 		pendingBlock, pendingReceipts, pendingState := miner.worker.pending()
 		if pendingState != nil && pendingBlock != nil {
-			return pendingBlock, pendingReceipts, pendingState.(*state.StateDB)
+			return pendingBlock, pendingReceipts, pendingState
 		}
 	}
 	// fallback to latest block

@@ -426,7 +426,7 @@ func (api *API) traceChain(start, end *types.Block, config *TraceConfig, closed 
 			// Send the block over to the concurrent tracers (if not in the fast-forward phase)
 			txs := next.Transactions()
 			select {
-			case taskCh <- &blockTraceTask{statedb: statedb.Copy().(*state.StateDB), parent: block, block: next, release: release, results: make([]*txTraceResult, len(txs))}:
+			case taskCh <- &blockTraceTask{statedb: statedb.Copy(), parent: block, block: next, release: release, results: make([]*txTraceResult, len(txs))}:
 			case <-closed:
 				tracker.releaseState(number, release)
 				return
@@ -789,7 +789,7 @@ txloop:
 		}
 
 		// Send the trace task over for execution
-		task := &txTraceTask{statedb: statedb.Copy().(*state.StateDB), index: i, isSystemTx: !beforeSystemTx}
+		task := &txTraceTask{statedb: statedb.Copy(), index: i, isSystemTx: !beforeSystemTx}
 		select {
 		case <-ctx.Done():
 			failed = ctx.Err()
@@ -1171,7 +1171,7 @@ func (api *API) traceTx(ctx context.Context, tx *types.Transaction, message *cor
 
 	// Call Prepare to clear out the statedb access list
 	statedb.SetTxContext(txctx.TxHash, txctx.TxIndex)
-	_, _, _, err = core.ApplyTransactionWithEVM(message, new(core.GasPool).AddGas(message.GasLimit), statedb, vmctx.BlockNumber, txctx.BlockHash, vmctx.Time, tx, &usedGas, evm)
+	_, err = core.ApplyTransactionWithEVM(message, new(core.GasPool).AddGas(message.GasLimit), statedb, vmctx.BlockNumber, txctx.BlockHash, vmctx.Time, tx, &usedGas, evm)
 	if err != nil {
 		return nil, fmt.Errorf("tracing failed: %w", err)
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/types/bal"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
 )
 
@@ -69,7 +69,7 @@ func (p *prestateResolver) account(addr common.Address) *types.StateAccount {
 	return res.(*types.StateAccount)
 }
 
-func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountState) *stateObject {
+func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
 	var acct *types.StateAccount
 	if a == nil {
 		acct = &types.StateAccount{
@@ -106,7 +106,7 @@ func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.S
 	return obj
 }
 
-func (s *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountState) *stateObject {
+func (s *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
 	var acct *types.StateAccount
 	if a == nil {
 		acct = &types.StateAccount{
@@ -136,10 +136,6 @@ func (s *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *
 	return obj
 }
 
-var IgnoredBALAddresses map[common.Address]struct{} = map[common.Address]struct{}{
-	params.SystemAddress: {},
-}
-
 // BALReader provides methods for reading account state from a block access
 // list.  State values returned from the Reader methods must not be modified.
 type BALReader struct {
@@ -151,7 +147,7 @@ type BALReader struct {
 // NewBALReader constructs a new reader from an access list. db is expected to have been instantiated with a reader.
 func NewBALReader(block *types.Block, db *StateDB) *BALReader {
 	r := &BALReader{accesses: make(map[common.Address]*bal.AccountAccess), block: block}
-	for _, acctDiff := range *block.Body().AccessList.AccessList {
+	for _, acctDiff := range *block.AccessList().AccessList {
 		r.accesses[acctDiff.Address] = &acctDiff
 	}
 	r.prestateReader.resolve(db.Reader(), r.ModifiedAccounts())
@@ -178,6 +174,9 @@ func (r *BALReader) ValidateStateReads(allReads bal.StateAccesses) error {
 				delete(reads, writeSlot)
 			}
 		}
+		if _, ok := r.accesses[addr]; !ok {
+			return fmt.Errorf("%x wasn't in BAL", addr)
+		}
 
 		expectedReads := r.accesses[addr].StorageReads
 		if len(reads) != len(expectedReads) {
@@ -190,6 +189,8 @@ func (r *BALReader) ValidateStateReads(allReads bal.StateAccesses) error {
 			}
 		}
 	}
+
+	// TODO: where do we validate that the storage read/write sets are distinct?
 
 	return nil
 }
@@ -232,7 +233,7 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 
 // changesAt returns all state changes at the given index.
 func (r *BALReader) changesAt(idx int) *bal.StateDiff {
-	res := &bal.StateDiff{make(map[common.Address]*bal.AccountState)}
+	res := &bal.StateDiff{make(map[common.Address]*bal.AccountMutations)}
 	for addr, _ := range r.accesses {
 		accountChanges := r.accountChangesAt(addr, idx)
 		if accountChanges != nil {
@@ -244,13 +245,13 @@ func (r *BALReader) changesAt(idx int) *bal.StateDiff {
 
 // accountChangesAt returns the state changes of an account at a given index,
 // or nil if there are no changes.
-func (r *BALReader) accountChangesAt(addr common.Address, idx int) *bal.AccountState {
+func (r *BALReader) accountChangesAt(addr common.Address, idx int) *bal.AccountMutations {
 	acct, exist := r.accesses[addr]
 	if !exist {
 		return nil
 	}
 
-	var res bal.AccountState
+	var res bal.AccountMutations
 
 	for i := len(acct.BalanceChanges) - 1; i >= 0; i-- {
 		if acct.BalanceChanges[i].TxIdx == uint16(idx) {
@@ -322,13 +323,13 @@ func (r *BALReader) readAccount(db *StateDB, addr common.Address, idx int) *stat
 }
 
 // readAccountDiff returns the accumulated state changes of an account up through idx.
-func (r *BALReader) readAccountDiff(addr common.Address, idx int) *bal.AccountState {
+func (r *BALReader) readAccountDiff(addr common.Address, idx int) *bal.AccountMutations {
 	diff, exist := r.accesses[addr]
 	if !exist {
 		return nil
 	}
 
-	var res bal.AccountState
+	var res bal.AccountMutations
 
 	for i := 0; i < len(diff.BalanceChanges) && diff.BalanceChanges[i].TxIdx <= uint16(idx); i++ {
 		res.Balance = diff.BalanceChanges[i].Balance
@@ -354,24 +355,113 @@ func (r *BALReader) readAccountDiff(addr common.Address, idx int) *bal.AccountSt
 	return &res
 }
 
-// ValidateStateDiff returns an error if the computed state diff is not equal to
-// diff reported from the access list at the given index.
-func (r *BALReader) ValidateStateDiff(idx int, computedDiff *bal.StateDiff) error {
-	balChanges := r.changesAt(idx)
+func (r *BALReader) ValidateStateDiffRange(startIdx int, endIdx int, computedDiff *bal.StateDiff) error {
+	balChanges := &bal.StateDiff{Mutations: make(map[common.Address]*bal.AccountMutations)}
+	for idx := startIdx; idx <= endIdx; idx++ {
+		balChanges.Merge(r.changesAt(idx))
+	}
 	for addr, state := range balChanges.Mutations {
 		computedAccountDiff, ok := computedDiff.Mutations[addr]
 		if !ok {
-			return fmt.Errorf("BAL contained account %x which wasn't present in computed state diff", addr)
+			return fmt.Errorf("BAL %d-%d contained account %x which wasn't present in computed state diff", startIdx, endIdx, addr)
 		}
 
 		if !state.Eq(computedAccountDiff) {
-			return fmt.Errorf("difference between computed state diff and BAL entry for account %x", addr)
+			// 【添加详细日志】
+			log.Error("=== BAL value mismatch ===",
+				"startIdx", startIdx,
+				"endIdx", endIdx,
+				"address", addr.Hex(),
+				"block", r.block.Number())
+
+			// 比较 Balance
+			if state.Balance != nil || computedAccountDiff.Balance != nil {
+				balBalance := "nil"
+				if state.Balance != nil {
+					balBalance = state.Balance.String()
+				}
+				computedBalance := "nil"
+				if computedAccountDiff.Balance != nil {
+					computedBalance = computedAccountDiff.Balance.String()
+				}
+				log.Error("  Balance mismatch",
+					"startIdx", startIdx,
+					"endIdx", endIdx,
+					"address", addr.Hex(),
+					"BAL", balBalance,
+					"computed", computedBalance)
+			}
+
+			// 比较 Nonce
+			if state.Nonce != nil || computedAccountDiff.Nonce != nil {
+				balNonce := "nil"
+				if state.Nonce != nil {
+					balNonce = fmt.Sprintf("%d", *state.Nonce)
+				}
+				computedNonce := "nil"
+				if computedAccountDiff.Nonce != nil {
+					computedNonce = fmt.Sprintf("%d", *computedAccountDiff.Nonce)
+				}
+				log.Error("  Nonce mismatch",
+					"startIdx", startIdx,
+					"endIdx", endIdx,
+					"address", addr.Hex(),
+					"BAL", balNonce,
+					"computed", computedNonce)
+			}
+
+			// 比较 Storage
+			balStorageCount := 0
+			if state.StorageWrites != nil {
+				balStorageCount = len(state.StorageWrites)
+			}
+			computedStorageCount := 0
+			if computedAccountDiff.StorageWrites != nil {
+				computedStorageCount = len(computedAccountDiff.StorageWrites)
+			}
+			if balStorageCount != computedStorageCount {
+				log.Error("  Storage count mismatch",
+					"startIdx", startIdx,
+					"endIdx", endIdx,
+					"address", addr.Hex(),
+					"BAL_count", balStorageCount,
+					"computed_count", computedStorageCount)
+			}
+
+			return fmt.Errorf("difference between computed state diff and BAL %d-%d entry for account %x", startIdx, endIdx, addr)
 		}
 	}
 
 	if len(balChanges.Mutations) != len(computedDiff.Mutations) {
-		return fmt.Errorf("computed state diff contained mutated accounts which weren't reported in BAL")
+		log.Error("Account count mismatch", "startIdx", startIdx,
+			"endIdx", endIdx,
+			"BAL_count", len(balChanges.Mutations),
+			"computed_count", len(computedDiff.Mutations))
+
+		balAccounts := make(map[common.Address]bool)
+		for addr := range balChanges.Mutations {
+			balAccounts[addr] = true
+			log.Error("  BAL has", "startIdx", startIdx,
+				"endIdx", endIdx,
+				"address", addr.Hex())
+		}
+
+		for addr := range computedDiff.Mutations {
+			if !balAccounts[addr] {
+				log.Error("  Computed has (NOT in BAL)", "startIdx", startIdx,
+					"endIdx", endIdx,
+					"address", addr.Hex())
+			}
+		}
+
+		return fmt.Errorf("computed state diff contained mutated accounts which weren't reported in BAL %d-%d", startIdx, endIdx)
 	}
 
 	return nil
+}
+
+// ValidateStateDiff returns an error if the computed state diff is not equal to
+// diff reported from the access list at the given index.
+func (r *BALReader) ValidateStateDiff(idx int, computedDiff *bal.StateDiff) error {
+	return r.ValidateStateDiffRange(idx, idx, computedDiff)
 }

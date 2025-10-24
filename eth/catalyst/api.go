@@ -766,8 +766,6 @@ func (api *ConsensusAPI) NewPayloadV5(params engine.ExecutableData, versionedHas
 		return invalidStatus, paramsErr("nil beaconRoot post-cancun")
 	case executionRequests == nil:
 		return invalidStatus, paramsErr("nil executionRequests post-prague")
-	case params.BlockAccessList == nil:
-		return invalidStatus, paramsErr("nil block access list post-amsterdam")
 	case !api.checkFork(params.Timestamp, forks.Prague, forks.Osaka):
 		return invalidStatus, unsupportedForkErr("newPayloadV5 must only be called for amsterdam payloads")
 	}

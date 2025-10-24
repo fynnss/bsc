@@ -918,6 +918,44 @@ func ReadBlobSidecarsRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.R
 	return data
 }
 
+// ReadBlockAccessListRLP retrieves all the block access list belonging to a block in RLP encoding.
+func ReadBlockAccessListRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
+	// BAL is only in kv DB, will not be put into ancient DB
+	data, _ := db.Get(blockAccessListKey(number, hash))
+	return data
+}
+
+// ReadBlockAccessList retrieves the block access list belonging to a block.
+func ReadBlockAccessList(db ethdb.Reader, hash common.Hash, number uint64) *types.BlockAccessListEncode {
+	data := ReadBlockAccessListRLP(db, hash, number)
+	if len(data) == 0 {
+		return nil
+	}
+	var ret types.BlockAccessListEncode
+	if err := rlp.DecodeBytes(data, &ret); err != nil {
+		log.Error("Invalid blob array RLP", "hash", hash, "err", err)
+		return nil
+	}
+	return &ret
+}
+
+func WriteBlockAccessList(db ethdb.KeyValueWriter, hash common.Hash, number uint64, bal *types.BlockAccessListEncode) {
+	data, err := rlp.EncodeToBytes(bal)
+	if err != nil {
+		log.Crit("Failed to encode block access list", "err", err)
+	}
+
+	if err := db.Put(blockAccessListKey(number, hash), data); err != nil {
+		log.Crit("Failed to store block access list", "err", err)
+	}
+}
+
+func DeleteBlockAccessList(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
+	if err := db.Delete(blockAccessListKey(number, hash)); err != nil {
+		log.Crit("Failed to delete block access list", "err", err)
+	}
+}
+
 // ReadBlobSidecars retrieves all the transaction blobs belonging to a block.
 func ReadBlobSidecars(db ethdb.Reader, hash common.Hash, number uint64) types.BlobSidecars {
 	data := ReadBlobSidecarsRLP(db, hash, number)
@@ -957,47 +995,6 @@ func WriteBlobSidecars(db ethdb.KeyValueWriter, hash common.Hash, number uint64,
 func DeleteBlobSidecars(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
 	if err := db.Delete(blockBlobSidecarsKey(number, hash)); err != nil {
 		log.Crit("Failed to delete block blobs", "err", err)
-	}
-}
-
-// ReadBALRLP retrieves all the block access list belonging to a block in RLP encoding.
-func ReadBALRLP(db ethdb.Reader, hash common.Hash, number uint64) rlp.RawValue {
-	// BAL is only in kv DB, will not be put into ancient DB
-	data, _ := db.Get(blockBALKey(number, hash))
-	return data
-}
-
-// ReadBAL retrieves the block access list belonging to a block.
-func ReadBAL(db ethdb.Reader, hash common.Hash, number uint64) *types.BlockAccessListEncode {
-	data := ReadBALRLP(db, hash, number)
-	if len(data) == 0 {
-		return nil
-	}
-	var ret types.BlockAccessListEncode
-	if err := rlp.DecodeBytes(data, &ret); err != nil {
-		log.Error("Invalid BAL RLP", "hash", hash, "err", err)
-		return nil
-	}
-	return &ret
-}
-
-func WriteBAL(db ethdb.KeyValueWriter, hash common.Hash, number uint64, bal *types.BlockAccessListEncode) {
-	if bal == nil {
-		return
-	}
-	data, err := rlp.EncodeToBytes(bal)
-	if err != nil {
-		log.Crit("Failed to encode block BAL", "err", err)
-	}
-
-	if err := db.Put(blockBALKey(number, hash), data); err != nil {
-		log.Crit("Failed to store block BAL", "err", err)
-	}
-}
-
-func DeleteBAL(db ethdb.KeyValueWriter, hash common.Hash, number uint64) {
-	if err := db.Delete(blockBALKey(number, hash)); err != nil {
-		log.Crit("Failed to delete block BAL", "err", err)
 	}
 }
 

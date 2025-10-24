@@ -333,7 +333,7 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 		// The system contracts clear themselves on a system-initiated read.
 		// When reading the requests mid-block, we don't want this behavior, so fork
 		// off the statedb before executing the system calls.
-		statedb = statedb.Copy().(*state.StateDB)
+		statedb = statedb.Copy()
 	}
 
 	if b.cm.config.IsPrague(b.header.Number, b.header.Time) && b.cm.config.Parlia == nil {
@@ -350,11 +350,11 @@ func (b *BlockGen) collectRequests(readonly bool) (requests [][]byte) {
 		blockContext := NewEVMBlockContext(b.header, b.cm, &b.header.Coinbase)
 		evm := vm.NewEVM(blockContext, statedb, b.cm.config, vm.Config{})
 		// EIP-7002
-		if _, _, err := ProcessWithdrawalQueue(&requests, evm); err != nil {
+		if err := ProcessWithdrawalQueue(&requests, evm); err != nil {
 			panic(fmt.Sprintf("could not process withdrawal requests: %v", err))
 		}
 		// EIP-7251
-		if _, _, err := ProcessConsolidationQueue(&requests, evm); err != nil {
+		if err := ProcessConsolidationQueue(&requests, evm); err != nil {
 			panic(fmt.Sprintf("could not process consolidation requests: %v", err))
 		}
 	}
@@ -436,7 +436,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 
 		body := types.Body{Transactions: b.txs, Uncles: b.uncles, Withdrawals: b.withdrawals}
-		block, _, err := b.engine.FinalizeAndAssemble(cm, b.header, statedb, &body, b.receipts, nil)
+		block, _, err := b.engine.FinalizeAndAssemble(cm, b.header, statedb, &body, b.receipts, nil, nil)
 		if err != nil {
 			panic(err)
 		}
@@ -553,7 +553,7 @@ func GenerateVerkleChain(config *params.ChainConfig, parent *types.Block, engine
 			Uncles:       b.uncles,
 			Withdrawals:  b.withdrawals,
 		}
-		block, _, err := b.engine.FinalizeAndAssemble(cm, b.header, statedb, body, b.receipts, nil)
+		block, _, err := b.engine.FinalizeAndAssemble(cm, b.header, statedb, body, b.receipts, nil, nil)
 		if err != nil {
 			panic(err)
 		}

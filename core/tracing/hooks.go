@@ -223,6 +223,14 @@ type (
 	// LogHook is called when a log is emitted.
 	LogHook = func(log *types.Log)
 
+	SelfDestructHook = func(address common.Address)
+	
+	// AccountReadHook is called when the account is accessed.
+	AccountReadHook = func(addr common.Address)
+
+	// StorageReadHook is called when the storage slot is accessed.
+	StorageReadHook = func(addr common.Address, slot common.Hash)
+
 	// BlockHashReadHook is called when EVM reads the blockhash of a block.
 	BlockHashReadHook = func(blockNumber uint64, hash common.Hash)
 )
@@ -251,6 +259,9 @@ type Hooks struct {
 	OnSystemTxEnd             OnSystemTxEndHook
 	OnSystemTxFixIntrinsicGas OnSystemTxFixIntrinsicGasHook
 
+	OnPreTxExecutionDone func() // called after pre-tx system contracts are invoked
+	OnBlockFinalization  func() // called after post-tx system contracts and consensus finalization are invoked
+
 	// State events
 	OnBalanceChange BalanceChangeHook
 	OnNonceChange   NonceChangeHook
@@ -261,6 +272,12 @@ type Hooks struct {
 	OnLog           LogHook
 	// Block hash read
 	OnBlockHashRead BlockHashReadHook
+
+	OnSelfDestructChange SelfDestructHook
+
+	// State access events
+	OnAccountRead AccountReadHook
+	OnStorageRead StorageReadHook
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
