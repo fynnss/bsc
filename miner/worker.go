@@ -634,7 +634,6 @@ func (w *worker) resultLoop() {
 					"accessListSize", block.AccessListSize(), "signData", common.Bytes2Hex(block.AccessList().SignData),
 					"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
 			} else {
-
 				log.Info("Successfully seal and write new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
 					"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
 			}

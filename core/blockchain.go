@@ -2597,7 +2597,6 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 			defer func() {
 				bc.cfg.VmConfig.Tracer = nil
 			}()
-
 		}
 
 		pstart := time.Now()

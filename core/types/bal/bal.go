@@ -182,25 +182,25 @@ func (c *idxAccessListBuilder) exitScope(evmErr bool) {
 // finalise returns the net state mutations at the access list index as well as
 // state which was accessed.  The idxAccessListBuilder instance should be discarded
 // after calling finalise.
-func (a *idxAccessListBuilder) finalise() (*StateDiff, StateAccesses) {
-	diff := &StateDiff{make(map[common.Address]*AccountMutations)}
+func (c *idxAccessListBuilder) finalise() (*StateDiff, StateAccesses) {
+	diff := &StateDiff{Mutations: make(map[common.Address]*AccountMutations)}
 	stateAccesses := make(StateAccesses)
 
-	for addr, access := range a.accessesStack[0] {
+	for addr, access := range c.accessesStack[0] {
 		// remove any mutations from the access list with no net difference vs the tx prestate value
-		if access.nonce != nil && *a.prestates[addr].nonce == *access.nonce {
+		if access.nonce != nil && *c.prestates[addr].nonce == *access.nonce {
 			access.nonce = nil
 		}
-		if access.balance != nil && a.prestates[addr].balance.Eq(access.balance) {
+		if access.balance != nil && c.prestates[addr].balance.Eq(access.balance) {
 			access.balance = nil
 		}
 
-		if access.code != nil && bytes.Equal(access.code, a.prestates[addr].code) {
+		if access.code != nil && bytes.Equal(access.code, c.prestates[addr].code) {
 			access.code = nil
 		}
 		if access.storageMutations != nil {
 			for key, val := range access.storageMutations {
-				if a.prestates[addr].storage[key] == val {
+				if c.prestates[addr].storage[key] == val {
 					delete(access.storageMutations, key)
 					access.storageReads[key] = struct{}{}
 				}
@@ -536,7 +536,7 @@ func (c *AccessListBuilder) FinalizedIdxChanges() (*StateDiff, StateAccesses) {
 	return c.lastFinalizedMutations, c.lastFinalizedAccesses
 }
 
-// StateDiff contains state mutations occuring over one or more access list
+// StateDiff contains state mutations occurring over one or more access list
 // index.
 type StateDiff struct {
 	Mutations map[common.Address]*AccountMutations `json:"Mutations,omitempty"`

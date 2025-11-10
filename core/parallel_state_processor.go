@@ -422,7 +422,6 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	var workers errgroup.Group
 	startingState := originalStateDB.Copy()
 	for _, job := range execJobs {
-		job := job
 		workers.Go(func() error {
 			res := p.execTx(block, job.tx, job.idx, job.balIdx, startingState.Copy(), signer)
 			txResCh <- *res

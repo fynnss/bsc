@@ -22,11 +22,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/ethereum/go-ethereum/core/types/bal"
 	stdmath "math"
 	"math/big"
 	"os"
 	"reflect"
+
+	"github.com/ethereum/go-ethereum/core/types/bal"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -226,7 +227,7 @@ func (t *BlockTest) Run(snapshotter bool, scheme string, witness bool, createAnd
 		var blocksWithBAL types.Blocks
 		for i := uint64(1); i <= chain.CurrentBlock().Number.Uint64(); i++ {
 			block := chain.GetBlockByNumber(i)
-			if block.Body().AccessList == nil {
+			if block.AccessList() == nil {
 				return fmt.Errorf("block missing BAL")
 			}
 			blocksWithBAL = append(blocksWithBAL, block)

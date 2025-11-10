@@ -333,13 +333,13 @@ func (s *hookedStateDB) GetLogs(hash common.Hash, blockNumber uint64, blockHash 
 func (s *hookedStateDB) IntermediateRoot(deleteEmpty bool) common.Hash {
 	return s.inner.IntermediateRoot(deleteEmpty)
 }
-func (a *hookedStateDB) Database() Database {
-	return a.inner.Database()
+func (s *hookedStateDB) Database() Database {
+	return s.inner.Database()
 }
-func (a *hookedStateDB) GetTrie() Trie {
-	return a.inner.GetTrie()
+func (s *hookedStateDB) GetTrie() Trie {
+	return s.inner.GetTrie()
 }
 
-func (a *hookedStateDB) IsAddressInMutations(addr common.Address) bool {
-	return a.inner.IsAddressInMutations(addr)
+func (s *hookedStateDB) IsAddressInMutations(addr common.Address) bool {
+	return s.inner.IsAddressInMutations(addr)
 }

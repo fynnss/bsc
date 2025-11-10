@@ -50,10 +50,6 @@ func (p *prestateResolver) resolve(r Reader, addrs []common.Address) {
 	}
 }
 
-func (p *prestateResolver) stop() {
-	p.cancel()
-}
-
 func (p *prestateResolver) account(addr common.Address) *types.StateAccount {
 	if _, ok := p.inProgress[addr]; !ok {
 		return nil
@@ -106,7 +102,7 @@ func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.S
 	return obj
 }
 
-func (s *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
+func (r *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
 	var acct *types.StateAccount
 	if a == nil {
 		acct = &types.StateAccount{
@@ -233,7 +229,7 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 
 // changesAt returns all state changes at the given index.
 func (r *BALReader) changesAt(idx int) *bal.StateDiff {
-	res := &bal.StateDiff{make(map[common.Address]*bal.AccountMutations)}
+	res := &bal.StateDiff{Mutations: make(map[common.Address]*bal.AccountMutations)}
 	for addr, _ := range r.accesses {
 		accountChanges := r.accountChangesAt(addr, idx)
 		if accountChanges != nil {

@@ -224,7 +224,7 @@ type (
 	LogHook = func(log *types.Log)
 
 	SelfDestructHook = func(address common.Address)
-	
+
 	// AccountReadHook is called when the account is accessed.
 	AccountReadHook = func(addr common.Address)
 

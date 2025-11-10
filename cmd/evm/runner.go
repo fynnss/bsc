@@ -317,7 +317,7 @@ func runCmd(ctx *cli.Context) error {
 		input = append(code, input...)
 		execFunc = func() ([]byte, uint64, error) {
 			// don't mutate the state!
-			runtimeConfig.State = prestate.Copy().(*state.StateDB)
+			runtimeConfig.State = prestate.Copy()
 			output, _, gasLeft, err := runtime.Create(input, &runtimeConfig)
 			return output, gasLeft, err
 		}
@@ -327,7 +327,7 @@ func runCmd(ctx *cli.Context) error {
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			// don't mutate the state!
-			runtimeConfig.State = prestate.Copy().(*state.StateDB)
+			runtimeConfig.State = prestate.Copy()
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)
 			return output, initialGas - gasLeft, err
 		}

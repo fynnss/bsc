@@ -947,6 +947,8 @@ func (api *ConsensusAPI) delayPayloadImport(block *types.Block) engine.PayloadSt
 
 // setInvalidAncestor is a callback for the downloader to notify us if a bad block
 // is encountered during the async sync.
+//
+//nolint:unused
 func (api *ConsensusAPI) setInvalidAncestor(invalid *types.Header, origin *types.Header) {
 	api.invalidLock.Lock()
 	defer api.invalidLock.Unlock()

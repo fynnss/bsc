@@ -661,11 +661,11 @@ func (s *StateDB) GetTransientState(addr common.Address, key common.Hash) common
 	return s.transientStorage.Get(addr, key)
 }
 
-//
 // Setting, updating & deleting state object methods.
 //
-
 // updateStateObject writes the given object to the trie.
+//
+//nolint:unused
 func (s *StateDB) updateStateObject(obj *stateObject) {
 	if s.db.NoTries() {
 		return
