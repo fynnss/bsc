@@ -105,6 +105,4 @@ type StateDB interface {
 	// Finalise must be invoked at the end of a transaction
 	Finalise(bool)
 	IntermediateRoot(deleteEmptyObjects bool) common.Hash
-
-	IsAddressInMutations(addr common.Address) bool
 }

@@ -1416,9 +1416,6 @@ func (p *Parlia) Finalize(chain consensus.ChainHeaderReader, header *types.Heade
 
 	systemcontracts.TryUpdateBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, state, false)
 
-	if err := p.checkNanoBlackList(state, header); err != nil {
-		return err
-	}
 	if p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
 		err := p.initializeFeynmanContract(state, header, cx, txs, receipts, systemTxs, usedGas, false, tracer)
 		if err != nil {
@@ -1596,10 +1593,6 @@ func (p *Parlia) FinalizeAndAssemble(chain consensus.ChainHeaderReader, header *
 	}
 
 	systemcontracts.TryUpdateBuildInSystemContract(p.chainConfig, header.Number, parent.Time, header.Time, workingState, false)
-
-	if err := p.checkNanoBlackList(workingState, header); err != nil {
-		return nil, nil, err
-	}
 
 	if p.chainConfig.IsOnFeynman(header.Number, parent.Time, header.Time) {
 		err := p.initializeFeynmanContract(workingState, header, cx, &body.Transactions, &receipts, nil, &header.GasUsed, true, tracer)
@@ -2458,19 +2451,6 @@ func (p *Parlia) NextProposalBlock(chain consensus.ChainHeaderReader, header *ty
 	return snap.nextProposalBlock(proposer)
 }
 
-func (p *Parlia) checkNanoBlackList(state vm.StateDB, header *types.Header) error {
-	if p.chainConfig.IsNano(header.Number) {
-		for _, blackListAddr := range types.NanoBlackList {
-			// Check if the address exists in state (as a proxy for mutations)
-			if state.IsAddressInMutations(blackListAddr) {
-				log.Error("blacklisted address found", "address", blackListAddr)
-				return fmt.Errorf("block contains blacklisted address: %s", blackListAddr.Hex())
-			}
-		}
-	}
-	return nil
-}
-
 func (p *Parlia) detectNewVersionWithFork(chain consensus.ChainHeaderReader, header *types.Header, state vm.StateDB) {
 	// Ignore blocks that are considered too old
 	const maxBlockReceiveDelay = 10 * time.Second
@@ -2489,8 +2469,6 @@ func (p *Parlia) detectNewVersionWithFork(chain consensus.ChainHeaderReader, hea
 	forkHashHex := hex.EncodeToString(nextForkHash[:])
 	if !snap.isMajorityFork(forkHashHex) {
 		logFn := log.Debug
-		// Note: NoTries() method is not available on vm.StateDB interface
-		// Using Debug level as default since we can't check NoTries()
 		logFn("possible fork detected: client is not in majority", "nextForkHash", forkHashHex)
 	}
 }
@@ -2536,8 +2514,6 @@ func applyMessage(
 		rules := evm.ChainConfig().Rules(evm.Context.BlockNumber, evm.Context.Random != nil, evm.Context.Time)
 		state.Prepare(rules, msg.From, evm.Context.Coinbase, msg.To, vm.ActivePrecompiles(rules), msg.AccessList)
 	}
-	// Note: ClearAccessList() is not available on vm.StateDB interface
-	// Access list clearing is handled by Prepare() method
 	// Increment the nonce for the next transaction
 	state.SetNonce(msg.From, state.GetNonce(msg.From)+1, tracing.NonceChangeEoACall)
 
