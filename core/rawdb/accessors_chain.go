@@ -933,7 +933,7 @@ func ReadBlockAccessList(db ethdb.Reader, hash common.Hash, number uint64) *type
 	}
 	var ret types.BlockAccessListEncode
 	if err := rlp.DecodeBytes(data, &ret); err != nil {
-		log.Error("Invalid blob array RLP", "hash", hash, "err", err)
+		log.Error("Invalid block access list RLP", "hash", hash, "err", err, "data len", len(data))
 		return nil
 	}
 	return &ret
