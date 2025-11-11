@@ -940,6 +940,9 @@ func ReadBlockAccessList(db ethdb.Reader, hash common.Hash, number uint64) *type
 }
 
 func WriteBlockAccessList(db ethdb.KeyValueWriter, hash common.Hash, number uint64, bal *types.BlockAccessListEncode) {
+	if bal == nil {
+		return
+	}
 	data, err := rlp.EncodeToBytes(bal)
 	if err != nil {
 		log.Crit("Failed to encode block access list", "err", err)
