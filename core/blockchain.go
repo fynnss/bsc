@@ -1790,8 +1790,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteRawReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
 			if bc.chainConfig.IsCancun(block.Number(), block.Time()) {
 				rawdb.WriteBlobSidecars(batch, block.Hash(), block.NumberU64(), block.Sidecars())
+				if bc.chainConfig.EnableBAL && block.AccessList() != nil {
+					rawdb.WriteBlockAccessList(batch, block.Hash(), block.NumberU64(), block.AccessList())
+				}
 			}
-			rawdb.WriteBlockAccessList(batch, block.Hash(), block.NumberU64(), block.AccessList())
 			// Write everything belongs to the blocks into the database. So that
 			// we can ensure all components of body is completed(body, receipts)
 			// except transaction indexes(will be created once sync is finished).
