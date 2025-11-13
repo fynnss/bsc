@@ -636,7 +636,9 @@ func (b *Block) WithAccessList(accessList *BlockAccessListEncode) *Block {
 		witness:      b.witness,
 		sidecars:     b.sidecars,
 	}
-	block.accessList = accessList
+	if accessList != nil {
+		block.accessList = accessList.Copy()
+	}
 	return block
 }
 
