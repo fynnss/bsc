@@ -2376,9 +2376,31 @@ func (bc *BlockChain) insertChain(chain types.Blocks, setHead bool, makeWitness 
 		makeBAL := enableBAL && !blockHasAccessList
 		validateBAL := enableBAL && blockHasAccessList
 
-		res, err := bc.ProcessBlock(parent.Root, block, setHead, makeWitness && len(chain) == 1, makeBAL, validateBAL)
-		if err != nil {
-			return nil, it.index, err
+		var res *blockProcessingResult
+		if enableBAL && !blockHasAccessList {
+			log.Info("BAL test mode, Phase 1 - generating BAL", "block", block.Number())
+
+			res, err = bc.ProcessBlock(parent.Root, block, false, false, true, false)
+			if err != nil {
+				return nil, it.index, err
+			}
+			if res.block.AccessList() == nil {
+				panic("BAL test mode, Phase 1: did not generate BAL")
+			}
+			log.Info("BAL test mode, Phase 2 - parallel process with bal",
+				"block", block.Number(),
+				"balSize", res.block.AccessListSize())
+
+			res, err = bc.ProcessBlock(parent.Root, res.block, setHead, makeWitness && len(chain) == 1, false, true)
+			if err != nil {
+				return nil, it.index, fmt.Errorf("BAL test mode, Phase 2 failed: %w", err)
+			}
+
+		} else {
+			res, err = bc.ProcessBlock(parent.Root, block, setHead, makeWitness && len(chain) == 1, makeBAL, validateBAL)
+			if err != nil {
+				return nil, it.index, err
+			}
 		}
 		bc.GetBlockStats(block.Hash()).ImportedBlockTime.Store(time.Now().UnixMilli())
 
@@ -2473,6 +2495,7 @@ type blockProcessingResult struct {
 	procTime time.Duration
 	status   WriteStatus
 	witness  *stateless.Witness
+	block    *types.Block
 }
 
 // processBlock executes and validates the given block. If there was no error
@@ -2623,7 +2646,7 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		if constructBALForTesting {
 			// very ugly... deep-copy the block body before setting the block access
 			// list on it to prevent mutating the block instance passed by the caller.
-			block.WithAccessList(balTracer.AccessListEncoded(block.NumberU64(), block.Hash()))
+			block = block.WithAccessList(balTracer.AccessListEncoded(block.NumberU64(), block.Hash()))
 		}
 		return result, ptime, vtime, nil
 	}
@@ -2777,6 +2800,7 @@ sequentialDone:
 		procTime: proctime,
 		status:   status,
 		witness:  witness,
+		block:    block,
 	}, nil
 }
 
