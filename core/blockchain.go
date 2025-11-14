@@ -2623,7 +2623,8 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 		if constructBALForTesting {
 			// very ugly... deep-copy the block body before setting the block access
 			// list on it to prevent mutating the block instance passed by the caller.
-			block.WithAccessList(balTracer.AccessListEncoded(block.NumberU64(), block.Hash()))
+			block = block.WithAccessList(balTracer.AccessListEncoded(block.NumberU64(), block.Hash()))
+			log.Info("constructBALForTesting", "block", block.Number(), "hash", block.Hash(), "balSize", block.AccessListSize())
 		}
 		return result, ptime, vtime, nil
 	}
