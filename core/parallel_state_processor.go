@@ -353,6 +353,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	balTracer, hooks := NewBlockAccessListTracer()
 	tracingStateDB := state.NewHookedState(statedb, hooks)
 	originalStateDB := statedb.Copy()
+	verifyStateDB := statedb.Copy()
 	// TODO: figure out exactly why we need to set the hooks on the TracingStateDB and the vm.Config
 	cfg = vm.Config{
 		Tracer:                  hooks,
@@ -429,7 +430,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 		})
 	}
 
-	go p.calcAndVerifyRoot(statedb, block, rootCalcResultCh)
+	go p.calcAndVerifyRoot(verifyStateDB, block, rootCalcResultCh)
 
 	res := <-resCh
 	if res.ProcessResult.Error != nil {
