@@ -912,7 +912,7 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 		case nil:
 			// All ok, quickly propagate to our peers
 			blockBroadcastOutTimer.UpdateSince(block.ReceivedAt)
-			go f.broadcastBlock(block, true)
+			go f.broadcastBlock(block, false)
 
 		case consensus.ErrFutureBlock:
 			log.Error("Received future block", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
@@ -934,9 +934,13 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 			return
 		}
 
+		blockWithBal := f.getBlock(hash)
+		if blockWithBal != nil {
+			blockWithBal = block
+		}
 		// If import succeeded, broadcast the block
 		blockAnnounceOutTimer.UpdateSince(block.ReceivedAt)
-		go f.broadcastBlock(block, false)
+		go f.broadcastBlock(blockWithBal, true)
 
 		// Invoke the testing hook if needed
 		if f.importedHook != nil {
