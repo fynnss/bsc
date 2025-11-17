@@ -893,6 +893,10 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 		)
 		return
 	}
+	log.Info("Enter announce branch",
+		"hash", hash,
+		"hasBlock", h.chain.HasBlock(hash, block.NumberU64()),
+		"peersCount", len(peers))
 	// Otherwise if the block is indeed in our own chain, announce it
 	if h.chain.HasBlock(hash, block.NumberU64()) {
 		for _, peer := range peers {
@@ -900,6 +904,10 @@ func (h *handler) BroadcastBlock(block *types.Block, propagate bool) {
 			peer.AsyncSendNewBlockHash(block)
 		}
 		log.Debug("Announced block", "hash", hash, "recipients", len(peers), "duration", common.PrettyDuration(time.Since(block.ReceivedAt)))
+	} else {
+		log.Warn("HasBlock returned false, not announcing",
+			"hash", hash,
+			"number", block.NumberU64())
 	}
 }
 
