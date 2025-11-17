@@ -911,8 +911,8 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 		switch err := f.verifyHeader(block.Header()); err {
 		case nil:
 			// All ok, quickly propagate to our peers
-			blockBroadcastOutTimer.UpdateSince(block.ReceivedAt)
-			go f.broadcastBlock(block, false)
+			// blockBroadcastOutTimer.UpdateSince(block.ReceivedAt)
+			// go f.broadcastBlock(block, true)
 
 		case consensus.ErrFutureBlock:
 			log.Error("Received future block", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
@@ -944,6 +944,7 @@ func (f *BlockFetcher) importBlocks(op *blockOrHeaderInject) {
 		// If import succeeded, broadcast the block
 		blockAnnounceOutTimer.UpdateSince(block.ReceivedAt)
 		go f.broadcastBlock(blockWithBal, true)
+		go f.broadcastBlock(blockWithBal, false)
 
 		// Invoke the testing hook if needed
 		if f.importedHook != nil {
