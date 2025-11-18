@@ -42,6 +42,7 @@ func (p *prestateResolver) resolve(r Reader, addrs []common.Address) {
 
 			acct, err := r.Account(resolveAddr)
 			if err != nil {
+				log.Error("Failed to get account", "address", resolveAddr, "error", err)
 				// TODO: what do here?
 			}
 			p.resolved.Store(resolveAddr, acct)
