@@ -309,21 +309,41 @@ func (s *hookedStateDB) AddLog(log *types.Log) {
 }
 
 func (s *hookedStateDB) Finalise(deleteEmptyObjects bool) {
-	/*
-		// TODO: implement this code without peering into statedb internals!!!
-			if s.hooks.OnBalanceChange != nil {
-				for addr := range s.inner.journal.dirties {
-					obj := s.inner.stateObjects[addr]
-					if obj != nil && obj.selfDestructed {
-						// If ether was sent to account post-selfdestruct it is burnt.
-						if bal := obj.Balance(); bal.Sign() != 0 {
-							s.hooks.OnBalanceChange(addr, bal.ToBig(), new(big.Int), tracing.BalanceDecreaseSelfdestructBurn)
-						}
+	defer s.inner.Finalise(deleteEmptyObjects)
+	if s.hooks.OnSelfDestructChange != nil || s.hooks.OnBalanceChange != nil || s.hooks.OnNonceChangeV2 != nil || s.hooks.OnCodeChangeV2 != nil || s.hooks.OnCodeChange != nil {
+		for addr := range s.inner.journal.dirties {
+			obj := s.inner.stateObjects[addr]
+			if obj != nil && obj.selfDestructed {
+				if obj.selfDestructed && s.hooks.OnSelfDestructChange != nil {
+					// when executing, can we tell the difference between
+					s.hooks.OnSelfDestructChange(obj.address)
+				}
+
+				// If ether was sent to account post-selfdestruct it is burnt.
+				if s.hooks.OnBalanceChange != nil {
+					if bal := obj.Balance(); bal.Sign() != 0 {
+						s.hooks.OnBalanceChange(addr, bal.ToBig(), new(big.Int), tracing.BalanceDecreaseSelfdestructBurn)
 					}
 				}
+				if s.hooks.OnNonceChangeV2 != nil {
+					prevNonce := obj.Nonce()
+					s.hooks.OnNonceChangeV2(addr, prevNonce, 0, tracing.NonceChangeSelfdestruct)
+				}
+				prevCodeHash := s.inner.GetCodeHash(addr)
+				prevCode := s.inner.GetCode(addr)
+
+				// if an initcode invokes selfdestruct, do not emit a code change.
+				if prevCodeHash == types.EmptyCodeHash {
+					continue
+				}
+				if s.hooks.OnCodeChangeV2 != nil {
+					s.hooks.OnCodeChangeV2(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil, tracing.CodeChangeSelfDestruct)
+				} else if s.hooks.OnCodeChange != nil {
+					s.hooks.OnCodeChange(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil)
+				}
 			}
-	*/
-	s.inner.Finalise(deleteEmptyObjects)
+		}
+	}
 }
 
 func (s *hookedStateDB) GetLogs(hash common.Hash, blockNumber uint64, blockHash common.Hash, blockTime uint64) []*types.Log {
