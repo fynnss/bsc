@@ -18,10 +18,14 @@
 package state
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -50,6 +54,11 @@ const defaultNumOfSlots = 100
 
 // TriesInMemory represents the number of layers that are kept in RAM.
 const TriesInMemory = 128
+
+const (
+	rootHashLogFileName = "bal_root_accounts.log"
+	balMismatchDir      = "bal_root_mismatch"
+)
 
 type mutationType int
 
@@ -161,6 +170,8 @@ type StateDB struct {
 	stateAccesses bal.StateAccesses // accounts/storage accessed during transaction execution
 
 	blockAccessList *BALReader
+
+	rootHashLogInfo *rootHashLogInfo
 
 	// Measurements gathered during execution for debugging purposes
 	AccountReads    time.Duration
@@ -1153,6 +1164,7 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	}
 
 	hash := s.trie.Hash()
+	s.logRootHashAccounts(hash, usedAddrs)
 	/*
 		it, err := s.trie.NodeIterator([]byte{})
 		if err != nil {
@@ -1177,6 +1189,184 @@ func (s *StateDB) IntermediateRoot(deleteEmptyObjects bool) common.Hash {
 	} else {
 		return hash
 	}
+}
+
+type rootHashLogInfo struct {
+	Mode        string
+	BlockNumber uint64
+	BlockHash   common.Hash
+	timestamp   time.Time
+}
+
+type rootHashLogEntry struct {
+	Mode        string   `json:"mode"`
+	BlockNumber uint64   `json:"blockNumber"`
+	BlockHash   string   `json:"blockHash"`
+	RootHash    string   `json:"rootHash"`
+	Timestamp   string   `json:"timestamp"`
+	Accounts    []string `json:"accounts"`
+}
+
+// SetRootHashLogInfo enables root hash logging for the next IntermediateRoot invocation.
+func (s *StateDB) SetRootHashLogInfo(mode string, blockNumber uint64, blockHash common.Hash) {
+	s.rootHashLogInfo = &rootHashLogInfo{
+		Mode:        mode,
+		BlockNumber: blockNumber,
+		BlockHash:   blockHash,
+		timestamp:   time.Now().UTC(),
+	}
+}
+
+// ClearRootHashLogInfo disables previously configured root hash logging.
+func (s *StateDB) ClearRootHashLogInfo() {
+	s.rootHashLogInfo = nil
+}
+
+func (s *StateDB) logRootHashAccounts(root common.Hash, accounts []common.Address) {
+	if s.rootHashLogInfo == nil {
+		return
+	}
+	entry := rootHashLogEntry{
+		Mode:        s.rootHashLogInfo.Mode,
+		BlockNumber: s.rootHashLogInfo.BlockNumber,
+		BlockHash:   s.rootHashLogInfo.BlockHash.Hex(),
+		RootHash:    root.Hex(),
+		Timestamp:   s.rootHashLogInfo.timestamp.Format(time.RFC3339),
+	}
+	if len(accounts) > 0 {
+		entry.Accounts = make([]string, len(accounts))
+		for i, addr := range accounts {
+			entry.Accounts[i] = addr.Hex()
+		}
+		sort.Strings(entry.Accounts)
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		log.Error("Failed to marshal root hash log entry", "err", err)
+		s.rootHashLogInfo = nil
+		return
+	}
+	if err := appendToFile(rootHashLogFileName, data); err != nil {
+		log.Error("Failed to write root hash log entry", "file", rootHashLogFileName, "err", err)
+	}
+	s.rootHashLogInfo = nil
+}
+
+func appendToFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	_, err = f.Write([]byte{'\n'})
+	return err
+}
+
+type stateMismatchDump struct {
+	Mode        string             `json:"mode"`
+	BlockNumber uint64             `json:"blockNumber"`
+	BlockHash   string             `json:"blockHash"`
+	LocalRoot   string             `json:"localRoot"`
+	RemoteRoot  string             `json:"remoteRoot"`
+	Timestamp   string             `json:"timestamp"`
+	Accounts    []stateAccountDump `json:"accounts"`
+}
+
+type stateAccountDump struct {
+	Address        string            `json:"address"`
+	Mutation       string            `json:"mutation"`
+	State          *accountStateDump `json:"state,omitempty"`
+	PendingStorage map[string]string `json:"pendingStorage,omitempty"`
+	DirtyStorage   map[string]string `json:"dirtyStorage,omitempty"`
+}
+
+type accountStateDump struct {
+	Nonce       uint64 `json:"nonce"`
+	Balance     string `json:"balance"`
+	StorageRoot string `json:"storageRoot"`
+	CodeHash    string `json:"codeHash"`
+}
+
+// DumpStateMismatch writes the current state of mutated accounts to disk to aid debugging.
+func (s *StateDB) DumpStateMismatch(mode string, blockNumber uint64, blockHash, localRoot, remoteRoot common.Hash) {
+	if s == nil {
+		return
+	}
+	dump := stateMismatchDump{
+		Mode:        mode,
+		BlockNumber: blockNumber,
+		BlockHash:   blockHash.Hex(),
+		LocalRoot:   localRoot.Hex(),
+		RemoteRoot:  remoteRoot.Hex(),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	for addr, mut := range s.mutations {
+		entry := stateAccountDump{
+			Address: addr.Hex(),
+		}
+		if mut.isDelete() {
+			entry.Mutation = "delete"
+			if obj, ok := s.stateObjectsDestruct[addr]; ok {
+				entry.State = accountStateFromStateAccount(&obj.data)
+				entry.PendingStorage = storageMapToHex(obj.pendingStorage)
+				entry.DirtyStorage = storageMapToHex(obj.dirtyStorage)
+			}
+		} else {
+			entry.Mutation = "update"
+			if obj, ok := s.stateObjects[addr]; ok {
+				entry.State = accountStateFromStateAccount(&obj.data)
+				entry.PendingStorage = storageMapToHex(obj.pendingStorage)
+				entry.DirtyStorage = storageMapToHex(obj.dirtyStorage)
+			}
+		}
+		dump.Accounts = append(dump.Accounts, entry)
+	}
+	if len(dump.Accounts) == 0 {
+		return
+	}
+	sort.Slice(dump.Accounts, func(i, j int) bool {
+		return dump.Accounts[i].Address < dump.Accounts[j].Address
+	})
+	data, err := json.MarshalIndent(dump, "", "  ")
+	if err != nil {
+		log.Error("Failed to marshal state mismatch dump", "err", err)
+		return
+	}
+	if err := os.MkdirAll(balMismatchDir, 0o755); err != nil {
+		log.Error("Failed to create state mismatch directory", "dir", balMismatchDir, "err", err)
+		return
+	}
+	filename := fmt.Sprintf("bal_state_%s_%d_%s_%d.json", mode, blockNumber, blockHash.Hex()[2:], time.Now().UnixNano())
+	fullpath := filepath.Join(balMismatchDir, filename)
+	if err := os.WriteFile(fullpath, data, 0o644); err != nil {
+		log.Error("Failed to write state mismatch dump", "file", fullpath, "err", err)
+	}
+}
+
+func accountStateFromStateAccount(acct *types.StateAccount) *accountStateDump {
+	if acct == nil {
+		return nil
+	}
+	return &accountStateDump{
+		Nonce:       acct.Nonce,
+		Balance:     acct.Balance.Hex(),
+		StorageRoot: acct.Root.Hex(),
+		CodeHash:    common.BytesToHash(acct.CodeHash).Hex(),
+	}
+}
+
+func storageMapToHex(storage Storage) map[string]string {
+	if len(storage) == 0 {
+		return nil
+	}
+	res := make(map[string]string, len(storage))
+	for key, value := range storage {
+		res[key.Hex()] = value.Hex()
+	}
+	return res
 }
 
 // SetTxContext sets the current transaction hash and index which are

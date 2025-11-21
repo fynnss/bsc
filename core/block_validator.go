@@ -176,7 +176,12 @@ func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateD
 		validateFuns = append(validateFuns, func() error {
 			// Validate the state root against the received state root and throw
 			// an error if they don't match.
+			if block.AccessList() != nil {
+				statedb.SetRootHashLogInfo("sequential", block.NumberU64(), block.Hash())
+			}
 			if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
+				dumpBALToFile(block, "sequential", root, header.Root)
+				statedb.DumpStateMismatch("sequential", block.NumberU64(), block.Hash(), root, header.Root)
 				return fmt.Errorf("invalid merkle root (remote: %x local: %x) dberr: %w", header.Root, root, statedb.Error())
 			}
 			return nil

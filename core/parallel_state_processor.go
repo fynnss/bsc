@@ -260,6 +260,9 @@ type stateRootCalculationResult struct {
 // it against what is reported by the block and returning a result on resCh.
 func (p *ParallelStateProcessor) calcAndVerifyRoot(preState *state.StateDB, block *types.Block, resCh chan stateRootCalculationResult) {
 	// calculate and apply the block state modifications
+	if block.AccessList() != nil {
+		preState.SetRootHashLogInfo("parallel", block.NumberU64(), block.Hash())
+	}
 	root, prestateLoadTime, rootCalcTime := preState.BlockAccessList().StateRoot(preState)
 
 	res := stateRootCalculationResult{
@@ -269,6 +272,8 @@ func (p *ParallelStateProcessor) calcAndVerifyRoot(preState *state.StateDB, bloc
 	}
 
 	if root != block.Root() {
+		dumpBALToFile(block, "parallel", root, block.Root())
+		preState.DumpStateMismatch("parallel", block.NumberU64(), block.Hash(), root, block.Root())
 		res.err = fmt.Errorf("state root mismatch. local: %x. remote: %x, db error: %v", root, block.Root(), preState.Error())
 	}
 	resCh <- res

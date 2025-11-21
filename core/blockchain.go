@@ -2677,6 +2677,9 @@ func (bc *BlockChain) ProcessBlock(parentRoot common.Hash, block *types.Block, s
 				bc.reportBlock(block, res, err)
 				return nil, err
 			}
+			if block.AccessList() != nil {
+				statedb.DumpStateMismatch("sequential_reference", block.NumberU64(), block.Hash(), block.Root(), block.Root())
+			}
 			parallelMetrics = false
 			goto sequentialDone
 		}
