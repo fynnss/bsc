@@ -2716,6 +2716,9 @@ sequentialDone:
 		stateRootCalctimer.Update(resWithMetrics.RootCalcTime)
 		blockPostprocessingTimer.Update(resWithMetrics.PostProcessTime)
 
+		blockExecutionTimer.Update(ptime) // The time spent on EVM processing
+		blockValidationTimer.Update(vtime)
+
 		accountHashTimer.Update(statedb.AccountHashes)
 	} else {
 		xvtime := time.Since(xvstart)
