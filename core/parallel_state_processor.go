@@ -17,6 +17,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/vm"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/params"
+	"github.com/panjf2000/ants/v2"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -42,14 +43,20 @@ type ProcessResultWithMetrics struct {
 type ParallelStateProcessor struct {
 	*StateProcessor
 	vmCfg *vm.Config
+	ants  *ants.Pool
 }
 
 // NewParallelStateProcessor returns a new ParallelStateProcessor instance.
 func NewParallelStateProcessor(config *params.ChainConfig, chain *HeaderChain, cfg *vm.Config) ParallelStateProcessor {
+	antsPool, err := ants.NewPool(ants.DefaultAntsPoolSize, ants.WithExpiryDuration(10*time.Second))
+	if err != nil {
+		panic(err)
+	}
 	res := NewStateProcessor(config, chain)
 	return ParallelStateProcessor{
 		res,
 		cfg,
+		antsPool,
 	}
 }
 
@@ -342,7 +349,7 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
-	alReader := state.NewBALReader(block, statedb)
+	alReader := state.NewBALReader(block, statedb, p.ants)
 	statedb.SetBlockAccessList(alReader)
 
 	var (

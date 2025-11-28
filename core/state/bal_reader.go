@@ -3,6 +3,7 @@ package state
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"time"
 
@@ -12,28 +13,36 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/holiman/uint256"
+	"github.com/panjf2000/ants/v2"
+	"golang.org/x/sync/errgroup"
 )
 
 // TODO: probably unnecessary to cache the resolved state object here as it will already be in the db cache?
 // ^ experiment with the performance of keeping this as-is vs just using the db cache.
 type prestateResolver struct {
-	inProgress map[common.Address]chan struct{}
-	resolved   sync.Map
-	ctx        context.Context
-	cancel     func()
+	inProgress  map[common.Address]chan struct{}
+	resolved    sync.Map
+	originSlots sync.Map
+	ctx         context.Context
+	cancel      func()
 }
 
-func (p *prestateResolver) resolve(r Reader, addrs []common.Address) {
+func SlotKey(addr common.Address, slot common.Hash) string {
+	return fmt.Sprintf("%s_%s", addr.Hex(), slot.Hex())
+}
+
+func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.Hash, ants *ants.Pool) {
 	p.inProgress = make(map[common.Address]chan struct{})
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
-	for _, addr := range addrs {
+	for addr := range addrs {
 		p.inProgress[addr] = make(chan struct{})
 	}
 
-	for _, addr := range addrs {
+	for addr, slots := range addrs {
 		resolveAddr := addr
-		go func() {
+		resloveSlots := slots
+		ants.Submit(func() {
 			select {
 			case <-p.ctx.Done():
 				return
@@ -45,9 +54,26 @@ func (p *prestateResolver) resolve(r Reader, addrs []common.Address) {
 				log.Error("Failed to get account", "address", resolveAddr, "error", err)
 				// TODO: what do here?
 			}
+			if len(resloveSlots) > 0 {
+				ants.Submit(func() {
+					for _, slot := range resloveSlots {
+						select {
+						case <-p.ctx.Done():
+							return
+						default:
+						}
+						oriSlot, err := r.Storage(resolveAddr, slot)
+						if err != nil {
+							log.Error("Failed to get storage", "address", resolveAddr, "slot", slot, "error", err)
+						}
+						p.originSlots.Store(SlotKey(resolveAddr, slot), oriSlot)
+					}
+				})
+			}
+
 			p.resolved.Store(resolveAddr, acct)
 			close(p.inProgress[resolveAddr])
-		}()
+		})
 	}
 }
 
@@ -56,9 +82,7 @@ func (p *prestateResolver) account(addr common.Address) *types.StateAccount {
 		return nil
 	}
 
-	select {
-	case <-p.inProgress[addr]:
-	}
+	<-p.inProgress[addr]
 	res, exist := p.resolved.Load(addr)
 	if !exist {
 		return nil
@@ -103,7 +127,7 @@ func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.S
 	return obj
 }
 
-func (r *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
+func (r *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) (*stateObject, error) {
 	var acct *types.StateAccount
 	if a == nil {
 		acct = &types.StateAccount{
@@ -116,21 +140,48 @@ func (r *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *
 		acct = a.Copy()
 	}
 	obj := newObject(db, addr, acct)
+	if diff == nil {
+		return obj, nil
+	}
 	if diff.Nonce != nil {
-		obj.SetNonce(*diff.Nonce)
+		obj.setNonce(*diff.Nonce)
 	}
 	if diff.Balance != nil {
-		obj.SetBalance(new(uint256.Int).Set(diff.Balance))
+		obj.setBalance(new(uint256.Int).Set(diff.Balance))
 	}
 	if diff.Code != nil {
-		obj.SetCode(crypto.Keccak256Hash(diff.Code), diff.Code)
+		obj.setCodeModified(crypto.Keccak256Hash(diff.Code), diff.Code)
 	}
 	if diff.StorageWrites != nil {
 		for key, val := range diff.StorageWrites {
-			obj.SetState(key, val)
+			origin, err := r.loadOriginSlot(addr, key)
+			if err != nil {
+				return nil, err
+			}
+			if origin == val {
+				continue
+			}
+			obj.originStorage[key] = origin
+			obj.pendingStorage[key] = val
+			obj.uncommittedStorage[key] = origin
 		}
 	}
-	return obj
+	return obj, nil
+}
+
+func (r *BALReader) loadOriginSlot(addr common.Address, slot common.Hash) (common.Hash, error) {
+	if origin, ok := r.prestateReader.originSlots.Load(SlotKey(addr, slot)); ok {
+		return origin.(common.Hash), nil
+	}
+	if r.reader == nil {
+		return common.Hash{}, fmt.Errorf("missing origin slot for %s", SlotKey(addr, slot))
+	}
+	origin, err := r.reader.Storage(addr, slot)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("failed to load storage %s: %w", SlotKey(addr, slot), err)
+	}
+	r.prestateReader.originSlots.Store(SlotKey(addr, slot), origin)
+	return origin, nil
 }
 
 // BALReader provides methods for reading account state from a block access
@@ -138,16 +189,38 @@ func (r *BALReader) initMutatedObjFromDiff(db *StateDB, addr common.Address, a *
 type BALReader struct {
 	block          *types.Block
 	accesses       map[common.Address]*bal.AccountAccess
+	reader         Reader
 	prestateReader prestateResolver
 }
 
 // NewBALReader constructs a new reader from an access list. db is expected to have been instantiated with a reader.
-func NewBALReader(block *types.Block, db *StateDB) *BALReader {
-	r := &BALReader{accesses: make(map[common.Address]*bal.AccountAccess), block: block}
+func NewBALReader(block *types.Block, db *StateDB, ants *ants.Pool) *BALReader {
+	r := &BALReader{
+		accesses: make(map[common.Address]*bal.AccountAccess),
+		block:    block,
+		reader:   db.reader,
+	}
 	for _, acctDiff := range *block.AccessList().AccessList {
 		r.accesses[acctDiff.Address] = &acctDiff
 	}
-	r.prestateReader.resolve(db.Reader(), r.ModifiedAccounts())
+	accountsWithStorage := make(map[common.Address][]common.Hash)
+	for addr, access := range r.accesses {
+		// 只预取有修改的账户
+		if len(access.NonceChanges) != 0 || len(access.CodeChanges) != 0 ||
+			len(access.StorageChanges) != 0 || len(access.BalanceChanges) != 0 {
+
+			// 收集需要预取的 storage slots
+			var slots []common.Hash
+			for _, change := range access.StorageChanges {
+				slots = append(slots, change.Slot)
+			}
+			// 也可以预取 StorageReads（可选）
+			// slots = append(slots, access.StorageReads...)
+
+			accountsWithStorage[addr] = slots
+		}
+	}
+	r.prestateReader.resolve(db.Reader(), accountsWithStorage, ants)
 	return r
 }
 
@@ -213,19 +286,115 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 	lastIdx := len(r.block.Transactions()) + 1
 	modifiedAccts := r.ModifiedAccounts()
 	startPrestateLoad := time.Now()
-	for _, addr := range modifiedAccts {
-		diff := r.readAccountDiff(addr, lastIdx)
-		acct := r.prestateReader.account(addr)
-		obj := r.initMutatedObjFromDiff(prestate, addr, acct, diff)
-		if obj != nil {
-			prestate.setStateObject(obj)
+	var (
+		workerLimit = runtime.GOMAXPROCS(0)
+		workers     errgroup.Group
+	)
+	if workerLimit > 0 {
+		workers.SetLimit(workerLimit)
+	}
+	if prestate.prefetcher == nil && len(modifiedAccts) > 0 && !prestate.NoTries() {
+		prestate.StartPrefetcher("bal-state-root", nil)
+	}
+	if prestate.prefetcher != nil {
+		scheduleBALAccountPrefetch(prestate, modifiedAccts)
+		if len(modifiedAccts) > 0 {
+			log.Info("BAL trie account prefetch scheduled", "block", r.block.Number(), "accounts", len(modifiedAccts))
 		}
+	}
+	resultBuf := len(modifiedAccts)
+	if resultBuf == 0 {
+		resultBuf = 1
+	}
+	type accountResult struct {
+		address      common.Address
+		object       *stateObject
+		storageRoot  common.Hash
+		storageSlots []common.Hash
+	}
+	results := make(chan accountResult, resultBuf)
+	for _, addr := range modifiedAccts {
+		addr := addr
+		workers.Go(func() error {
+			diff := r.readAccountDiff(addr, lastIdx)
+			acct := r.prestateReader.account(addr)
+			var (
+				storageRoot  common.Hash
+				storageSlots []common.Hash
+			)
+			if acct != nil && diff != nil && diff.StorageWrites != nil {
+				storageRoot = acct.Root
+				if storageRoot != types.EmptyRootHash {
+					for slot := range diff.StorageWrites {
+						storageSlots = append(storageSlots, slot)
+					}
+				}
+			}
+			obj, err := r.initMutatedObjFromDiff(prestate, addr, acct, diff)
+			if err != nil {
+				return err
+			}
+			if obj != nil {
+				results <- accountResult{
+					address:      addr,
+					object:       obj,
+					storageRoot:  storageRoot,
+					storageSlots: storageSlots,
+				}
+			}
+			return nil
+		})
+	}
+	go func() {
+		if err := workers.Wait(); err != nil {
+			prestate.setError(fmt.Errorf("load prestate: %w", err))
+		}
+		close(results)
+	}()
+	var (
+		storagePrefetchAccounts int
+		storagePrefetchSlots    int
+	)
+	for res := range results {
+		if prestate.prefetcher != nil && len(res.storageSlots) > 0 {
+			scheduleBALStoragePrefetch(prestate, res.address, res.storageRoot, res.storageSlots)
+			storagePrefetchAccounts++
+			storagePrefetchSlots += len(res.storageSlots)
+		}
+		prestate.setStateObject(res.object)
+		prestate.journal.dirty(res.address)
+	}
+	if storagePrefetchAccounts > 0 {
+		log.Info("BAL trie storage prefetch scheduled", "block", r.block.Number(), "accounts", storagePrefetchAccounts, "slots", storagePrefetchSlots)
 	}
 	prestateLoadTime = time.Since(startPrestateLoad)
 	rootUpdateStart := time.Now()
 	root = prestate.IntermediateRoot(true)
 	rootUpdateTime = time.Since(rootUpdateStart)
 	return root, prestateLoadTime, rootUpdateTime
+}
+
+func scheduleBALAccountPrefetch(prestate *StateDB, addresses []common.Address) {
+	if prestate.prefetcher == nil || len(addresses) == 0 {
+		return
+	}
+	addrs := make([]common.Address, len(addresses))
+	copy(addrs, addresses)
+	if err := prestate.prefetcher.prefetch(common.Hash{}, prestate.originalRoot, common.Address{}, addrs, nil, false); err != nil {
+		log.Debug("Failed to prefetch BAL accounts", "count", len(addrs), "err", err)
+	}
+}
+
+func scheduleBALStoragePrefetch(prestate *StateDB, addr common.Address, storageRoot common.Hash, slots []common.Hash) {
+	if prestate.prefetcher == nil || len(slots) == 0 || storageRoot == (common.Hash{}) || storageRoot == types.EmptyRootHash {
+		return
+	}
+	slotCopy := make([]common.Hash, len(slots))
+	copy(slotCopy, slots)
+	addrHash := crypto.Keccak256Hash(addr[:])
+	if err := prestate.prefetcher.prefetch(addrHash, storageRoot, addr, nil, slotCopy, false); err != nil {
+		log.Debug("Failed to prefetch BAL storage", "address", addr, "slots", len(slotCopy), "err", err)
+	}
 }
 
 // changesAt returns all state changes at the given index.

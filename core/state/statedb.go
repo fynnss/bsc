@@ -264,6 +264,9 @@ func (s *StateDB) StartPrefetcher(namespace string, witness *stateless.Witness) 
 	// the prefetcher is constructed. For more details, see:
 	// https://github.com/ethereum/go-ethereum/issues/29880
 	s.prefetcher = newTriePrefetcher(s.db, s.originalRoot, namespace, witness == nil)
+	if namespace == "bal-state-root" {
+		log.Info("BAL trie prefetcher started", "root", s.originalRoot)
+	}
 	if err := s.prefetcher.prefetch(common.Hash{}, s.originalRoot, common.Address{}, nil, nil, false); err != nil {
 		log.Error("Failed to prefetch account trie", "root", s.originalRoot, "err", err)
 	}
