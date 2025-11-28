@@ -54,11 +54,12 @@ type prefetchMsg struct {
 //
 // Note, the prefetcher's API is not thread safe.
 type triePrefetcher struct {
-	verkle   bool                   // Flag whether the prefetcher is in verkle mode
-	db       Database               // Database to fetch trie nodes through
-	root     common.Hash            // Root hash of the account trie for metrics
-	fetches  map[string]Trie        // Partially or fully fetched tries. Only populated for inactive copies
-	fetchers map[string]*subfetcher // Subfetchers for each trie
+	verkle    bool                   // Flag whether the prefetcher is in verkle mode
+	db        Database               // Database to fetch trie nodes through
+	root      common.Hash            // Root hash of the account trie for metrics
+	namespace string                 // Identifier used for metrics/logging
+	fetches   map[string]Trie        // Partially or fully fetched tries. Only populated for inactive copies
+	fetchers  map[string]*subfetcher // Subfetchers for each trie
 
 	noreads bool // Whether to ignore state-read-only prefetch requests
 
@@ -92,6 +93,7 @@ func newTriePrefetcher(db Database, root common.Hash, namespace string, noreads 
 		verkle:    db.TrieDB().IsVerkle(),
 		db:        db,
 		root:      root,
+		namespace: namespace,
 		fetchers:  make(map[string]*subfetcher), // Active prefetchers use the fetchers map
 		abortChan: make(chan *subfetcher, abortChanSize),
 
@@ -130,7 +132,7 @@ func (p *triePrefetcher) mainLoop() {
 			id := p.trieID(pMsg.owner, pMsg.root)
 			fetcher := p.fetchers[id]
 			if fetcher == nil {
-				fetcher = newSubfetcher(p.db, p.root, pMsg.owner, pMsg.root, pMsg.addr)
+				fetcher = newSubfetcher(p.db, p.root, pMsg.owner, pMsg.root, pMsg.addr, p.namespace)
 				p.fetchersMutex.Lock()
 				p.fetchers[id] = fetcher
 				p.fetchersMutex.Unlock()
@@ -280,6 +282,9 @@ func (p *triePrefetcher) prefetch(owner common.Hash, root common.Hash, addr comm
 	select {
 	case <-p.closeMainChan: // skip closed trie prefetcher
 	case p.prefetchChan <- &prefetchMsg{owner, root, addr, keys}:
+		if p.namespace == "bal-state-root" && len(keys) > 0 {
+			log.Debug("BAL trie prefetch request enqueued", "owner", owner, "addr", addr, "keys", len(keys))
+		}
 	}
 	return nil
 }
@@ -366,12 +371,13 @@ func (p *triePrefetcher) trieID(owner common.Hash, root common.Hash) string {
 // main prefetcher is paused and either all requested items are processed or if
 // the trie being worked on is retrieved from the prefetcher.
 type subfetcher struct {
-	db    Database       // Database to load trie nodes through
-	state common.Hash    // Root hash of the state to prefetch
-	owner common.Hash    // Owner of the trie, usually account hash
-	root  common.Hash    // Root hash of the trie to prefetch
-	addr  common.Address // Address of the account that the trie belongs to
-	trie  Trie           // Trie being populated with nodes
+	db        Database       // Database to load trie nodes through
+	state     common.Hash    // Root hash of the state to prefetch
+	owner     common.Hash    // Owner of the trie, usually account hash
+	root      common.Hash    // Root hash of the trie to prefetch
+	addr      common.Address // Address of the account that the trie belongs to
+	namespace string         // Identifier used for logging
+	trie      Trie           // Trie being populated with nodes
 
 	tasks [][]byte   // Items queued up for retrieval
 	lock  sync.Mutex // Lock protecting the task queue
@@ -391,18 +397,19 @@ type subfetcher struct {
 
 // newSubfetcher creates a goroutine to prefetch state items belonging to a
 // particular root hash.
-func newSubfetcher(db Database, state common.Hash, owner common.Hash, root common.Hash, addr common.Address) *subfetcher {
+func newSubfetcher(db Database, state common.Hash, owner common.Hash, root common.Hash, addr common.Address, namespace string) *subfetcher {
 	sf := &subfetcher{
-		db:    db,
-		state: state,
-		owner: owner,
-		root:  root,
-		addr:  addr,
-		wake:  make(chan struct{}, 1),
-		stop:  make(chan struct{}),
-		term:  make(chan struct{}),
-		copy:  make(chan chan Trie),
-		seen:  make(map[string]struct{}),
+		db:        db,
+		state:     state,
+		owner:     owner,
+		root:      root,
+		addr:      addr,
+		namespace: namespace,
+		wake:      make(chan struct{}, 1),
+		stop:      make(chan struct{}),
+		term:      make(chan struct{}),
+		copy:      make(chan chan Trie),
+		seen:      make(map[string]struct{}),
 	}
 	go sf.loop()
 	return sf
@@ -450,7 +457,7 @@ func (sf *subfetcher) scheduleParallel(keys [][]byte) {
 	keysLeft := keys[keyIndex:]
 	keysLeftSize := len(keysLeft)
 	for i := 0; i*parallelTriePrefetchCapacity < keysLeftSize; i++ {
-		child := newSubfetcher(sf.db, sf.state, sf.owner, sf.root, sf.addr)
+		child := newSubfetcher(sf.db, sf.state, sf.owner, sf.root, sf.addr, sf.namespace)
 		sf.paraChildren = append(sf.paraChildren, child)
 		endIndex := (i + 1) * parallelTriePrefetchCapacity
 		if endIndex >= keysLeftSize {
@@ -553,6 +560,9 @@ func (sf *subfetcher) loop() {
 			tasks := sf.tasks
 			sf.tasks = nil
 			sf.lock.Unlock()
+			if len(tasks) > 0 && sf.namespace == "bal-state-root" {
+				log.Debug("BAL trie prefetcher processing batch", "owner", sf.owner, "addr", sf.addr, "keys", len(tasks))
+			}
 
 			// Prefetch any tasks until the loop is interrupted
 			for i, task := range tasks {
