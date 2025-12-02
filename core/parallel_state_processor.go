@@ -351,6 +351,10 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	}
 	alReader := state.NewBALReader(block, statedb, p.ants)
 	statedb.SetBlockAccessList(alReader)
+	alReader.PrefetchExecutionData(statedb)
+	// Wait for critical prefetch operations to complete before starting transaction execution.
+	// This ensures that account data is preloaded, reducing execution time variance.
+	alReader.WaitForPrefetch()
 
 	var (
 		context vm.BlockContext

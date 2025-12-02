@@ -25,6 +25,7 @@ type prestateResolver struct {
 	originSlots sync.Map
 	ctx         context.Context
 	cancel      func()
+	resolveWG   sync.WaitGroup // WaitGroup to track resolution completion
 }
 
 func SlotKey(addr common.Address, slot common.Hash) string {
@@ -39,10 +40,14 @@ func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.H
 		p.inProgress[addr] = make(chan struct{})
 	}
 
+	// Track the number of accounts to resolve
+	p.resolveWG.Add(len(addrs))
+
 	for addr, slots := range addrs {
 		resolveAddr := addr
 		resloveSlots := slots
 		ants.Submit(func() {
+			defer p.resolveWG.Done()
 			select {
 			case <-p.ctx.Done():
 				return
@@ -55,6 +60,7 @@ func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.H
 				// TODO: what do here?
 			}
 			if len(resloveSlots) > 0 {
+				// Use a separate goroutine for storage slots to avoid blocking account resolution
 				ants.Submit(func() {
 					for _, slot := range resloveSlots {
 						select {
@@ -75,6 +81,12 @@ func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.H
 			close(p.inProgress[resolveAddr])
 		})
 	}
+}
+
+// WaitForAccounts waits for all account resolutions to complete.
+// This ensures that account data is ready before transaction execution starts.
+func (p *prestateResolver) WaitForAccounts() {
+	p.resolveWG.Wait()
 }
 
 func (p *prestateResolver) account(addr common.Address) *types.StateAccount {
@@ -191,6 +203,7 @@ type BALReader struct {
 	accesses       map[common.Address]*bal.AccountAccess
 	reader         Reader
 	prestateReader prestateResolver
+	prefetchOnce   sync.Once
 }
 
 // NewBALReader constructs a new reader from an access list. db is expected to have been instantiated with a reader.
@@ -204,19 +217,20 @@ func NewBALReader(block *types.Block, db *StateDB, ants *ants.Pool) *BALReader {
 		r.accesses[acctDiff.Address] = &acctDiff
 	}
 	accountsWithStorage := make(map[common.Address][]common.Hash)
+	// 预取所有在 BAL 中出现的账户，不仅仅是 ModifiedAccounts
 	for addr, access := range r.accesses {
-		// 只预取有修改的账户
-		if len(access.NonceChanges) != 0 || len(access.CodeChanges) != 0 ||
-			len(access.StorageChanges) != 0 || len(access.BalanceChanges) != 0 {
+		// 收集需要预取的 storage slots
+		var slots []common.Hash
+		// 预取 StorageChanges（写入的存储槽）
+		for _, change := range access.StorageChanges {
+			slots = append(slots, change.Slot)
+		}
+		// 预取 StorageReads（读取的存储槽），确保交易执行时数据已准备好
+		slots = append(slots, access.StorageReads...)
 
-			// 收集需要预取的 storage slots
-			var slots []common.Hash
-			for _, change := range access.StorageChanges {
-				slots = append(slots, change.Slot)
-			}
-			// 也可以预取 StorageReads（可选）
-			// slots = append(slots, access.StorageReads...)
-
+		// 如果有存储槽需要预取，或者账户有修改，则添加到预取列表
+		if len(slots) > 0 || len(access.NonceChanges) != 0 || len(access.CodeChanges) != 0 ||
+			len(access.BalanceChanges) != 0 {
 			accountsWithStorage[addr] = slots
 		}
 	}
@@ -232,6 +246,64 @@ func (r *BALReader) ModifiedAccounts() (res []common.Address) {
 		}
 	}
 	return res
+}
+
+// PrefetchExecutionData exposes trie prefetching for callers which want to warm
+// the cache before transaction execution. The actual scheduling logic is shared
+// with the root-verification path to avoid duplication.
+func (r *BALReader) PrefetchExecutionData(db *StateDB) {
+	r.prefetchOnce.Do(func() {
+		// 预取所有在 BAL 中出现的账户，不仅仅是 ModifiedAccounts
+		// 这包括只读账户，确保交易执行时所有可能访问的数据都已预取
+		allAccounts := make([]common.Address, 0, len(r.accesses))
+		for addr := range r.accesses {
+			allAccounts = append(allAccounts, addr)
+		}
+		r.prefetchTrieData(db, allAccounts)
+	})
+}
+
+// WaitForPrefetch waits for critical prefetch operations to complete,
+// ensuring that account data is ready before transaction execution starts.
+// This helps reduce execution time variance by ensuring data is preloaded.
+func (r *BALReader) WaitForPrefetch() {
+	// Wait for account resolutions to complete
+	r.prestateReader.WaitForAccounts()
+}
+
+func (r *BALReader) prefetchTrieData(db *StateDB, addresses []common.Address) (int, int) {
+	if db == nil || len(addresses) == 0 {
+		return 0, 0
+	}
+	scheduleBALAccountPrefetch(db, addresses)
+	var (
+		storageAccounts int
+		storageSlots    int
+	)
+	for _, addr := range addresses {
+		access := r.accesses[addr]
+		if access == nil {
+			continue
+		}
+		acct := r.prestateReader.account(addr)
+		if acct == nil || acct.Root == types.EmptyRootHash {
+			continue
+		}
+		var slots []common.Hash
+		// 预取 StorageChanges（写入的存储槽）
+		for _, change := range access.StorageChanges {
+			slots = append(slots, change.Slot)
+		}
+		// 预取 StorageReads（读取的存储槽），确保交易执行时数据已准备好
+		slots = append(slots, access.StorageReads...)
+		if len(slots) == 0 {
+			continue
+		}
+		scheduleBALStoragePrefetch(db, addr, acct.Root, slots)
+		storageAccounts++
+		storageSlots += len(slots)
+	}
+	return storageAccounts, storageSlots
 }
 
 func (r *BALReader) ValidateStateReads(allReads bal.StateAccesses) error {
@@ -307,10 +379,8 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 		resultBuf = 1
 	}
 	type accountResult struct {
-		address      common.Address
-		object       *stateObject
-		storageRoot  common.Hash
-		storageSlots []common.Hash
+		address common.Address
+		object  *stateObject
 	}
 	results := make(chan accountResult, resultBuf)
 	for _, addr := range modifiedAccts {
@@ -318,28 +388,14 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 		workers.Go(func() error {
 			diff := r.readAccountDiff(addr, lastIdx)
 			acct := r.prestateReader.account(addr)
-			var (
-				storageRoot  common.Hash
-				storageSlots []common.Hash
-			)
-			if acct != nil && diff != nil && diff.StorageWrites != nil {
-				storageRoot = acct.Root
-				if storageRoot != types.EmptyRootHash {
-					for slot := range diff.StorageWrites {
-						storageSlots = append(storageSlots, slot)
-					}
-				}
-			}
 			obj, err := r.initMutatedObjFromDiff(prestate, addr, acct, diff)
 			if err != nil {
 				return err
 			}
 			if obj != nil {
 				results <- accountResult{
-					address:      addr,
-					object:       obj,
-					storageRoot:  storageRoot,
-					storageSlots: storageSlots,
+					address: addr,
+					object:  obj,
 				}
 			}
 			return nil
@@ -351,21 +407,12 @@ func (r *BALReader) StateRoot(prestate *StateDB) (root common.Hash, prestateLoad
 		}
 		close(results)
 	}()
-	var (
-		storagePrefetchAccounts int
-		storagePrefetchSlots    int
-	)
 	for res := range results {
-		if prestate.prefetcher != nil && len(res.storageSlots) > 0 {
-			scheduleBALStoragePrefetch(prestate, res.address, res.storageRoot, res.storageSlots)
-			storagePrefetchAccounts++
-			storagePrefetchSlots += len(res.storageSlots)
-		}
 		prestate.setStateObject(res.object)
 		prestate.journal.dirty(res.address)
 	}
-	if storagePrefetchAccounts > 0 {
-		log.Info("BAL trie storage prefetch scheduled", "block", r.block.Number(), "accounts", storagePrefetchAccounts, "slots", storagePrefetchSlots)
+	if accounts, slots := r.prefetchTrieData(prestate, modifiedAccts); accounts > 0 {
+		log.Info("BAL trie storage prefetch scheduled", "block", r.block.Number(), "accounts", accounts, "slots", slots)
 	}
 	prestateLoadTime = time.Since(startPrestateLoad)
 	rootUpdateStart := time.Now()
@@ -400,7 +447,7 @@ func scheduleBALStoragePrefetch(prestate *StateDB, addr common.Address, storageR
 // changesAt returns all state changes at the given index.
 func (r *BALReader) changesAt(idx int) *bal.StateDiff {
 	res := &bal.StateDiff{Mutations: make(map[common.Address]*bal.AccountMutations)}
-	for addr, _ := range r.accesses {
+	for addr := range r.accesses {
 		accountChanges := r.accountChangesAt(addr, idx)
 		if accountChanges != nil {
 			res.Mutations[addr] = accountChanges

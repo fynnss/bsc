@@ -326,20 +326,22 @@ func (s *hookedStateDB) Finalise(deleteEmptyObjects bool) {
 					}
 				}
 				if s.hooks.OnNonceChangeV2 != nil {
-					prevNonce := obj.Nonce()
-					s.hooks.OnNonceChangeV2(addr, prevNonce, 0, tracing.NonceChangeSelfdestruct)
+					if prevNonce := obj.Nonce(); prevNonce != 0 {
+						s.hooks.OnNonceChangeV2(addr, prevNonce, 0, tracing.NonceChangeSelfdestruct)
+					}
 				}
-				prevCodeHash := s.inner.GetCodeHash(addr)
-				prevCode := s.inner.GetCode(addr)
-
-				// if an initcode invokes selfdestruct, do not emit a code change.
-				if prevCodeHash == types.EmptyCodeHash {
-					continue
-				}
-				if s.hooks.OnCodeChangeV2 != nil {
-					s.hooks.OnCodeChangeV2(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil, tracing.CodeChangeSelfDestruct)
-				} else if s.hooks.OnCodeChange != nil {
-					s.hooks.OnCodeChange(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil)
+				if s.hooks.OnCodeChangeV2 != nil || s.hooks.OnCodeChange != nil {
+					st := s.inner.getStateObject(addr)
+					prevCodeHash := common.BytesToHash(st.CodeHash())
+					prevCode := st.Code()
+					if prevCodeHash == types.EmptyCodeHash {
+						continue
+					}
+					if s.hooks.OnCodeChangeV2 != nil {
+						s.hooks.OnCodeChangeV2(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil, tracing.CodeChangeSelfDestruct)
+					} else if s.hooks.OnCodeChange != nil {
+						s.hooks.OnCodeChange(addr, prevCodeHash, prevCode, types.EmptyCodeHash, nil)
+					}
 				}
 			}
 		}
