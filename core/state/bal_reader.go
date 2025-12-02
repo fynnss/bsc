@@ -32,7 +32,7 @@ func SlotKey(addr common.Address, slot common.Hash) string {
 	return fmt.Sprintf("%s_%s", addr.Hex(), slot.Hex())
 }
 
-func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.Hash, ants *ants.Pool) {
+func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.Hash) {
 	p.inProgress = make(map[common.Address]chan struct{})
 	p.ctx, p.cancel = context.WithCancel(context.Background())
 
@@ -43,44 +43,78 @@ func (p *prestateResolver) resolve(r Reader, addrs map[common.Address][]common.H
 	// Track the number of accounts to resolve
 	p.resolveWG.Add(len(addrs))
 
+	// Use errgroup to control concurrency and batch process accounts
+	// This reduces goroutine overhead and lock contention compared to
+	// creating a goroutine for each account and storage slot
+	var workers errgroup.Group
+	// Limit concurrency to avoid excessive goroutines and lock contention
+	// Use a reasonable limit based on CPU cores
+	workerLimit := runtime.GOMAXPROCS(0) * 2
+	if workerLimit > len(addrs) {
+		workerLimit = len(addrs)
+	}
+	if workerLimit > 0 {
+		workers.SetLimit(workerLimit)
+	}
+
+	// Process each account: read account first, then batch read all its storage slots
+	// This reduces goroutine count from N + N to N, and batches storage reads
 	for addr, slots := range addrs {
 		resolveAddr := addr
-		resloveSlots := slots
-		ants.Submit(func() {
+		resolveSlots := slots
+		workers.Go(func() error {
 			defer p.resolveWG.Done()
 			select {
 			case <-p.ctx.Done():
-				return
+				return nil
 			default:
 			}
 
+			// Read account first
 			acct, err := r.Account(resolveAddr)
 			if err != nil {
 				log.Error("Failed to get account", "address", resolveAddr, "error", err)
-				// TODO: what do here?
-			}
-			if len(resloveSlots) > 0 {
-				// Use a separate goroutine for storage slots to avoid blocking account resolution
-				ants.Submit(func() {
-					for _, slot := range resloveSlots {
-						select {
-						case <-p.ctx.Done():
-							return
-						default:
-						}
-						oriSlot, err := r.Storage(resolveAddr, slot)
-						if err != nil {
-							log.Error("Failed to get storage", "address", resolveAddr, "slot", slot, "error", err)
-						}
-						p.originSlots.Store(SlotKey(resolveAddr, slot), oriSlot)
-					}
-				})
+				// Still mark as resolved even on error to avoid blocking
+				p.resolved.Store(resolveAddr, nil)
+				close(p.inProgress[resolveAddr])
+				return nil
 			}
 
+			// Batch read all storage slots for this account in the same goroutine
+			// This reduces goroutine overhead and allows better batching
+			if len(resolveSlots) > 0 {
+				// Read all storage slots sequentially in this goroutine
+				// This batches the reads and reduces lock contention
+				for _, slot := range resolveSlots {
+					select {
+					case <-p.ctx.Done():
+						return nil
+					default:
+					}
+					oriSlot, err := r.Storage(resolveAddr, slot)
+					if err != nil {
+						log.Error("Failed to get storage", "address", resolveAddr, "slot", slot, "error", err)
+						// Continue with other slots even if one fails
+						continue
+					}
+					p.originSlots.Store(SlotKey(resolveAddr, slot), oriSlot)
+				}
+			}
+
+			// Store resolved account and signal completion
 			p.resolved.Store(resolveAddr, acct)
 			close(p.inProgress[resolveAddr])
+			return nil
 		})
 	}
+
+	// Wait for all workers to complete in background
+	// This allows the caller to proceed while resolution continues
+	go func() {
+		if err := workers.Wait(); err != nil {
+			log.Error("Error during account resolution", "error", err)
+		}
+	}()
 }
 
 // WaitForAccounts waits for all account resolutions to complete.
@@ -90,16 +124,30 @@ func (p *prestateResolver) WaitForAccounts() {
 }
 
 func (p *prestateResolver) account(addr common.Address) *types.StateAccount {
-	if _, ok := p.inProgress[addr]; !ok {
+	ch, ok := p.inProgress[addr]
+	if !ok {
 		return nil
 	}
 
-	<-p.inProgress[addr]
-	res, exist := p.resolved.Load(addr)
-	if !exist {
+	// Try non-blocking check first - if account is already resolved, return immediately
+	// This avoids blocking the goroutine if data is ready
+	select {
+	case <-ch:
+		// Account is ready, get it from resolved map
+		if res, exist := p.resolved.Load(addr); exist {
+			return res.(*types.StateAccount)
+		}
+		return nil
+	default:
+		// Account not ready yet, but we need to wait for it
+		// This blocks the goroutine, but Go scheduler will switch to other goroutines
+		// so CPU can still process other work
+		<-ch
+		if res, exist := p.resolved.Load(addr); exist {
+			return res.(*types.StateAccount)
+		}
 		return nil
 	}
-	return res.(*types.StateAccount)
 }
 
 func (r *BALReader) initObjFromDiff(db *StateDB, addr common.Address, a *types.StateAccount, diff *bal.AccountMutations) *stateObject {
@@ -207,7 +255,8 @@ type BALReader struct {
 }
 
 // NewBALReader constructs a new reader from an access list. db is expected to have been instantiated with a reader.
-func NewBALReader(block *types.Block, db *StateDB, ants *ants.Pool) *BALReader {
+// The reader uses errgroup for concurrent batch reading instead of ants pool for better control.
+func NewBALReader(block *types.Block, db *StateDB, _ *ants.Pool) *BALReader {
 	r := &BALReader{
 		accesses: make(map[common.Address]*bal.AccountAccess),
 		block:    block,
@@ -234,7 +283,7 @@ func NewBALReader(block *types.Block, db *StateDB, ants *ants.Pool) *BALReader {
 			accountsWithStorage[addr] = slots
 		}
 	}
-	r.prestateReader.resolve(db.Reader(), accountsWithStorage, ants)
+	r.prestateReader.resolve(db.Reader(), accountsWithStorage)
 	return r
 }
 
@@ -266,9 +315,24 @@ func (r *BALReader) PrefetchExecutionData(db *StateDB) {
 // WaitForPrefetch waits for critical prefetch operations to complete,
 // ensuring that account data is ready before transaction execution starts.
 // This helps reduce execution time variance by ensuring data is preloaded.
+// We only wait for ModifiedAccounts as they are most likely to be accessed
+// during transaction execution, reducing wait time while still warming cache.
 func (r *BALReader) WaitForPrefetch() {
-	// Wait for account resolutions to complete
-	r.prestateReader.WaitForAccounts()
+	// Wait for modified accounts to be resolved - these are most critical
+	// as they will definitely be accessed during execution
+	modifiedAccounts := r.ModifiedAccounts()
+	for _, addr := range modifiedAccounts {
+		if ch, ok := r.prestateReader.inProgress[addr]; ok {
+			// Wait for this account to be resolved (non-blocking check first)
+			select {
+			case <-ch:
+				// Account resolved, cache should be populated
+			default:
+				// If not ready, wait for it - this ensures cache is warm
+				<-ch
+			}
+		}
+	}
 }
 
 func (r *BALReader) prefetchTrieData(db *StateDB, addresses []common.Address) (int, int) {
@@ -280,15 +344,51 @@ func (r *BALReader) prefetchTrieData(db *StateDB, addresses []common.Address) (i
 		storageAccounts int
 		storageSlots    int
 	)
+
+	// Prefetch storage slots for accounts
+	// Try to get account from prestateResolver first, but fallback to direct reader read
+	// if not ready yet - this allows prefetching to proceed without blocking
 	for _, addr := range addresses {
 		access := r.accesses[addr]
 		if access == nil {
 			continue
 		}
-		acct := r.prestateReader.account(addr)
-		if acct == nil || acct.Root == types.EmptyRootHash {
+
+		var storageRoot common.Hash
+
+		// Check if account is already resolved in prestateResolver
+		if ch, ok := r.prestateReader.inProgress[addr]; ok {
+			// Try non-blocking read from channel
+			select {
+			case <-ch:
+				// Account is ready, get it from resolved map
+				if res, exist := r.prestateReader.resolved.Load(addr); exist {
+					if acct := res.(*types.StateAccount); acct != nil {
+						storageRoot = acct.Root
+					}
+				}
+			default:
+				// Account not ready yet, read directly from reader for prefetching
+				// This allows prefetching to proceed without blocking on account resolution
+				if r.reader != nil {
+					if directAcct, err := r.reader.Account(addr); err == nil && directAcct != nil {
+						storageRoot = directAcct.Root
+					}
+				}
+			}
+		} else {
+			// Account not in prestateResolver, read directly from reader
+			if r.reader != nil {
+				if directAcct, err := r.reader.Account(addr); err == nil && directAcct != nil {
+					storageRoot = directAcct.Root
+				}
+			}
+		}
+
+		if storageRoot == (common.Hash{}) || storageRoot == types.EmptyRootHash {
 			continue
 		}
+
 		var slots []common.Hash
 		// 预取 StorageChanges（写入的存储槽）
 		for _, change := range access.StorageChanges {
@@ -299,7 +399,7 @@ func (r *BALReader) prefetchTrieData(db *StateDB, addresses []common.Address) (i
 		if len(slots) == 0 {
 			continue
 		}
-		scheduleBALStoragePrefetch(db, addr, acct.Root, slots)
+		scheduleBALStoragePrefetch(db, addr, storageRoot, slots)
 		storageAccounts++
 		storageSlots += len(slots)
 	}
@@ -532,6 +632,13 @@ func (r *BALReader) isModified(addr common.Address) bool {
 func (r *BALReader) readAccount(db *StateDB, addr common.Address, idx int) *stateObject {
 	diff := r.readAccountDiff(addr, idx)
 	prestate := r.prestateReader.account(addr)
+	// If prestate is not available from resolver (e.g., not in prefetch list or not ready),
+	// fallback to reading directly from reader to avoid blocking
+	if prestate == nil && r.reader != nil {
+		if acct, err := r.reader.Account(addr); err == nil {
+			prestate = acct
+		}
+	}
 	return r.initObjFromDiff(db, addr, prestate, diff)
 }
 

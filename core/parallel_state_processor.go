@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"time"
 
@@ -351,9 +352,13 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	}
 	alReader := state.NewBALReader(block, statedb, p.ants)
 	statedb.SetBlockAccessList(alReader)
+
+	// Prefetch all execution data and wait for critical data to be ready
+	// This ensures reader cache is warmed up before parallel execution starts,
+	// reducing lock contention and cache misses during transaction execution
 	alReader.PrefetchExecutionData(statedb)
-	// Wait for critical prefetch operations to complete before starting transaction execution.
-	// This ensures that account data is preloaded, reducing execution time variance.
+	// Wait for account prestate resolution to complete - this populates reader cache
+	// and ensures data is ready before transactions start executing
 	alReader.WaitForPrefetch()
 
 	var (
@@ -431,8 +436,19 @@ func (p *ParallelStateProcessor) Process(block *types.Block, statedb *state.Stat
 	expectedResults := len(execJobs)
 	go p.resultHandler(block, stateReads, postTxState, tExecStart, txResCh, rootCalcResultCh, resCh, cfg, expectedResults)
 	var workers errgroup.Group
+	// Limit concurrency to avoid excessive goroutines and resource contention
+	// Each transaction execution involves StateDB copying and state access,
+	// so we need to balance parallelism with lock contention and memory usage
+	workerLimit := runtime.GOMAXPROCS(0) * 2
+	if workerLimit > len(execJobs) {
+		workerLimit = len(execJobs)
+	}
+	if workerLimit > 0 {
+		workers.SetLimit(workerLimit)
+	}
 	startingState := originalStateDB.Copy()
 	for _, job := range execJobs {
+		job := job // capture loop variable
 		workers.Go(func() error {
 			res := p.execTx(block, job.tx, job.idx, job.balIdx, startingState.Copy(), signer)
 			txResCh <- *res
